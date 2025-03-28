@@ -37,5 +37,8 @@ def transform(batch, processor):
 if __name__ == '__main__':
     # rest
     ds = load_dataset(path='rafaelpadilla/coco2017',cache_dir='/Data/Dataset/COCO',split='val')
+    
+    
     processor = Processor()
     prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+    ipdb.set_trace()

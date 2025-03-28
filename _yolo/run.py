@@ -25,7 +25,7 @@ if __name__ == '__main__':
     im2 = Image.open("im2.jpg")
     im3 = Image.open("im3.jpg")
     im4 = Image.open("im4.jpg")
-    # ipdb.set_trace()
+    ipdb.set_trace()
     results = yolo.predict(source=[im1,im2,im3,im4], save=True)
     for m in model: print(m.i, type(m))
     ipdb.set_trace()
