@@ -1,16 +1,8 @@
 from ultralytics import YOLO
-
 from torch.fx import symbolic_trace
 import torch
 import ipdb;
 from PIL import Image
-
-
-
-
-from ultralytics.nn.modules.head import Detect
-from ultralytics.nn.tasks import DetectionModel
-
 from yolo import Yolov8
 
 
