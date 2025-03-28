@@ -1,0 +1,6 @@
+__pycache__
+_logs
+*.pt
+_model
+runs
+*.jpg
