@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-
+import ipdb
+import numpy as np
 class Conv(nn.Module):
     """
     Standard convolution module with batch normalization and activation.
@@ -30,7 +31,7 @@ class Conv(nn.Module):
         """
         super().__init__()
         self.conv = module.conv
-        self.bn   = module.bn
+        # self.bn   = module.bn
         self.act  = module.act
 
     def forward(self, x):
@@ -43,7 +44,7 @@ class Conv(nn.Module):
         Returns:
             (torch.Tensor): Output tensor.
         """
-        return self.act(self.bn(self.conv(x)))
+        return self.act(self.conv(x))
 
 
 class SPPF(nn.Module):
@@ -145,11 +146,11 @@ class Detect(torch.nn.Module):
 
     def forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
-        # outs = []
-        # for i in range(self.nl):
-        #     feat = x[i]
-        #     outs.append(torch.cat((self.cv2[i](feat), self.cv3[i](feat)), dim=1))
-        dbox = self._inference(x)
+        outs = []
+        for i in range(self.nl):
+            feat = x[i]
+            outs.append(torch.cat((self.cv2[i](feat), self.cv3[i](feat)), dim=1))
+        dbox = self._inference(outs)
         # return outs, dbox
         return dbox
     def _inference(self, x):
@@ -192,7 +193,7 @@ class Detect(torch.nn.Module):
         return torch.cat((c_xy, wh), 1)
 
 
-class Yolov8(torch.nn.Module):
+class Yolov8s(torch.nn.Module):
     def __init__(self, model):
         super().__init__()
         self.m0  = Conv(model[0])
@@ -219,10 +220,10 @@ class Yolov8(torch.nn.Module):
         self.m21 = C2f(model[21])
         self.m22 = Detect(model[22])
 
-    def forward(self, x):
-        r0  = self.m0(x)        
-        r1  = self.m1(r0)
-        r2  = self.m2(r1)        
+    def forward(self, x):       
+        r0  = self.m0(x)    
+        r1  = self.m1(r0)        
+        r2  = self.m2(r1)     
         r3  = self.m3(r2)
         r4  = self.m4(r3)
         r5  = self.m5(r4)
@@ -232,7 +233,7 @@ class Yolov8(torch.nn.Module):
         r9  = self.m9(r8)
         r10 = self.m10(r9)
         r11 = self.m11([r10,r6])
-        r12 = self.m12(r11)
+        r12 = self.m12(r11)        
         r13 = self.m13(r12)
         r14 = self.m14([r13,r4])
         r15 = self.m15(r14)
@@ -242,5 +243,5 @@ class Yolov8(torch.nn.Module):
         r19 = self.m19(r18)
         r20 = self.m20([r19,r9])
         r21 = self.m21(r20)
-        r22 = self.m22([r15,r18,r21])
+        r22 = self.m22([r15,r18,r21])        
         return r22
