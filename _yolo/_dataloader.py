@@ -29,10 +29,17 @@ class Processor:
         return result
 
 def transform(data_batch, processor):
-    image_ = data_batch['image']
-    image_ = [np.array(im.convert('RGB'))[..., ::-1] for im in image_]    
+    # ipdb.set_trace()
+    origin_shape=[]
+    image_ = []
+    data_batch['origin_image'] = data_batch['image']
+    for im in data_batch['image']:
+        im = np.array(im.convert('RGB'))[..., ::-1]
+        image_.append(im)
+        origin_shape.append(im.shape)
     image_ = processor(image_)
     data_batch["image"] = image_
+    data_batch['origin_shape'] = origin_shape
     return data_batch
 
 def custom_collate_fn(batch):
@@ -43,14 +50,17 @@ def custom_collate_fn(batch):
     
     # image_id는 리스트 형태로 묶습니다.
     image_ids = [item['image_id'] for item in batch]
-    
+    origin_shape = [item['origin_shape'] for item in batch]
+    origin_image = [item['origin_image'] for item in batch]
     # objects 역시 리스트로 묶습니다.
     objects = [item['objects'] for item in batch]
     
     return {
         'image': images,
         'image_id': image_ids,
-        'objects': objects
+        'objects': objects,
+        'origin_shape': origin_shape,
+        'origin_image':origin_image
     }
 
 if __name__ == '__main__':

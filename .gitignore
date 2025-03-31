@@ -3,3 +3,4 @@ _logs
 *.pt
 _model
 runs
+_coco_gt
