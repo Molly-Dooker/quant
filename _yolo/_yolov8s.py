@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-import ipdb
-import numpy as np
 class Conv(nn.Module):
     """
     Standard convolution module with batch normalization and activation.
@@ -46,7 +44,6 @@ class Conv(nn.Module):
         """
         return self.act(self.conv(x))
 
-
 class SPPF(nn.Module):
     """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
 
@@ -76,7 +73,6 @@ class SPPF(nn.Module):
         y = [self.cv1(x)]
         y.extend(self.m(y[-1]) for _ in range(3))
         return self.cv2(torch.cat(y, 1))
-
 
 class Concat(nn.Module):
     """
@@ -108,7 +104,6 @@ class Concat(nn.Module):
         """
         return torch.cat(x, self.d)
 
-
 class C2f(torch.nn.Module):
     """Faster Implementation of CSP Bottleneck with 2 convolutions."""
     def __init__(self,module):
@@ -126,8 +121,6 @@ class C2f(torch.nn.Module):
             outputs.append(x2)
         result = self.cv2(torch.cat(outputs, dim=1))
         return result
-
-
 
 class Detect(torch.nn.Module):
     def __init__(self, model):
@@ -191,7 +184,6 @@ class Detect(torch.nn.Module):
         c_xy = (x1y1 + x2y2) / 2
         wh = x2y2 - x1y1
         return torch.cat((c_xy, wh), 1)
-
 
 class Yolov8s(torch.nn.Module):
     def __init__(self, model):

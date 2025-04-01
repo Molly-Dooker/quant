@@ -1,25 +1,19 @@
-import ipdb.stdout
-from ultralytics import YOLO
-from torch.fx import symbolic_trace
-import torch
-import ipdb;
-from PIL import Image
-from yolo import Yolov8s
-from datasets import load_dataset
-from _dataloader import Processor, transform, custom_collate_fn
-from _nms import _get_nms 
-import numpy as np;
-import cv2
-from tqdm import tqdm
-from loguru import logger
 import sys
-import evaluate
-import json
-from torch import BoolTensor, IntTensor, Tensor
-from torchmetrics.detection import MeanAveragePrecision
-from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
-from ultralytics.models.yolo.detect import DetectionValidator
+import ipdb
+from loguru import logger
+from tqdm import tqdm
+
+import torch
+import numpy as np;
+from datasets import load_dataset
+from ultralytics import YOLO
+from ultralytics.utils.metrics import DetMetrics, box_iou
 from ultralytics.utils.ops import non_max_suppression, scale_boxes
+from torch.fx import symbolic_trace
+
+from _yolov8s import Yolov8s
+from _dataloader import Processor, transform, custom_collate_fn
+
 
 names = {
             0: "person",
@@ -104,7 +98,6 @@ names = {
             79: "toothbrush"
             }
 names_reversed = {v: k for k, v in names.items()}
-
 mapper = {
     1: "person",
     2: "bicycle",
@@ -359,17 +352,6 @@ def eval(model, device, dataloader, prefix=''):
     if len(stats):
         metrics.process(**stats)
     result = metrics.results_dict
-    
-            
-
-
-
-
-
-
-
-
-
 
 if __name__ == '__main__':
     logger_enable('yolo8s')
