@@ -1,3 +1,4 @@
+import ipdb.stdout
 from ultralytics import YOLO
 from torch.fx import symbolic_trace
 import torch
@@ -14,7 +15,7 @@ from loguru import logger
 import sys
 import evaluate
 import json
-from torchmetrics.detection import MeanAveragePrecision
+from torch import BoolTensor, IntTensor, Tensor
 def logger_enable(prefix=''):
     global logger
     logger.remove()
@@ -30,23 +31,57 @@ def logger_enable(prefix=''):
             format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
+def get_preds(nms):
+    preds=[]
+    for nms_ in nms:
+        pred = dict()        
+        nms_ = nms_.cpu()
+        pred['boxes']=nms_[:,:4]
+        pred['scores']=nms_[:,4]
+        pred['labels']=nms_[:,-1].to(torch.int32)
+        preds.append(pred)
+    return preds
+
+def get_targets(objects):
+    targets=[]
+    for object in objects:
+        target = dict()
+        bboxes = object['bbox']
+        boxes = []
+        for bbox in bboxes:
+            xyxy = torch.tensor([bbox[0],bbox[1],bbox[0]+bbox[2],bbox[1]+bbox[3]])
+            boxes.append(xyxy)
+        if len(boxes)==0: 
+            boxes = torch.tensor([])
+            labels= torch.tensor([],dtype=torch.int32)
+        else:
+            boxes = torch.stack(boxes)
+            labels = torch.tensor(object['label'],dtype=torch.int32)-1
+        target['boxes']=boxes;
+        target['labels']=labels;
+        targets.append(target)
+    return targets;
+
+    
+
 def eval(model, device, dataloader,get_nms, prefix=''):
     model.to(device)
     model.eval()
     # ipdb.set_trace()
-    metric = MeanAveragePrecision(iou_type="bbox")
+
     with torch.no_grad():
         for batch in tqdm(dataloader,desc='EVAL..'):
             img = batch['image'].to(device)
             objects = batch['objects']
-            id  = batch['image_id']            
+            # id  = batch['image_id']            
             origin_shapes = batch['origin_shape']
-            preds = y8(img)
-            nms = get_nms(preds,origin_shapes)
-            ipdb.set_trace()
+            output  = model(img)
+            nms     = get_nms(output,origin_shapes)
+            preds   = get_preds(nms)            
+            targets = get_targets(objects)           
 
-    acc = metric.compute()['accuracy']
-    logger.info(f'{prefix} model acc : {acc*100:.2f}%')
+
+
 
 def get_coco_gt(path):
     with open(path, 'r', encoding='utf-8') as f:
@@ -57,27 +92,14 @@ if __name__ == '__main__':
     logger_enable('yolo8s')
     device = 'cuda:2'  
     
-    coco_gt = get_coco_gt('_coco_gt/coco_gt.json')
-
     yolo =  YOLO("yolov8s.pt")
     yolo.fuse()
     yolo.eval()
 
-    ds = load_dataset(path='rafaelpadilla/coco2017',cache_dir='/Data/Dataset/COCO',split='val')   
-
-    processor = Processor()
-    prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-    dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=32, shuffle=False, collate_fn=custom_collate_fn)
-    y8 = Yolov8s(yolo.model.model)
-
-    # get_nms = lambda preds,origin_shapes: _get_nms(preds,origin_shapes,conf_thres=0.05,iou_thres=0.45,scaled_shape=(640,640))
-    get_nms = lambda preds,origin_shapes: _get_nms(preds,origin_shapes,conf_thres=0.25,iou_thres=0.7,scaled_shape=(640,640))
-    eval(y8,device,dataloader,get_nms)
-
-    # yolo.to(device)
-    # ipdb.set_trace()
+    yolo.to(device)
+    results = yolo.val(data="_coco.yaml", imgsz=640, plots=False)
     # result_origin = yolo.predict(source=ds[:32]['image'], save=True)    
-    # ipdb.set_trace()
+    ipdb.set_trace()
     
 
 
