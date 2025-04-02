@@ -63,9 +63,9 @@ def custom_collate_fn(batch):
         'origin_image':origin_image
     }
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
     # rest
-    ds = load_dataset(path='rafaelpadilla/coco2017',cache_dir='/Data/Dataset/COCO',split='val')   
-    processor = Processor()
-    prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-    dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=512, shuffle=True, collate_fn=custom_collate_fn)
+    # ds = load_dataset(path='rafaelpadilla/coco2017',cache_dir='/Data/Dataset/COCO',split='val')   
+    # processor = Processor()
+    # prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+    # dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=512, shuffle=True, collate_fn=custom_collate_fn)

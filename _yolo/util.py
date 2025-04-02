@@ -252,7 +252,7 @@ def _process_batch(detections, gt_bboxes, gt_cls):
     return result
 
 
-def update_stats(preds, objects, origin_shapes, stats, device):
+def update_stats(preds, objects, origin_shapes, stats, device, size=640):
     for si, pred in enumerate(preds):
         npr = len(pred)
         stat = dict(
@@ -272,7 +272,7 @@ def update_stats(preds, objects, origin_shapes, stats, device):
                 for k in stats.keys():
                     stats[k].append(stat[k])
             continue        
-        predn=_restore_scale(pred, origin_shape)
+        predn=_restore_scale(pred, origin_shape,(size,size))
         stat["conf"] = predn[:, 4]
         stat["pred_cls"] = predn[:, 5]
         if nl:

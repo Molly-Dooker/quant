@@ -37,7 +37,7 @@ from _dataloader import Processor, transform, custom_collate_fn
 
         
 
-def eval(model, device, dataloader, prefix=''):    
+def eval(model, device, dataloader, size=640, prefix=''):    
     stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
     nms = lambda predictions: non_max_suppression(prediction=predictions, conf_thres=0.001, iou_thres=0.7, labels=[], nc=80, multi_label=True, agnostic=False, max_det=300, end2end=False, rotated=False)
     metrics = DetMetrics()
@@ -53,7 +53,7 @@ def eval(model, device, dataloader, prefix=''):
             origin_shapes = batch['origin_shape']
             output  = model(img)
             preds = nms(output)
-            stats = update_stats(preds, objects, origin_shapes, stats, device)
+            stats = update_stats(preds, objects, origin_shapes, stats, device, size)
     stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in stats.items()}
     stats.pop("target_img", None)
     if len(stats):
@@ -97,14 +97,13 @@ def main(args):
         yolo.eval()
 
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-        processor = Processor()
+        processor = Processor(new_shape=(args.size, args.size))
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
-        model = Yolov8s(yolo.model.model)
+        model = Yolov8s(yolo.model.model, args.size)
 
         # check default performance
-        # eval(model, args.device, dataloader, 'default')
-
+        # eval(model, args.device, dataloader, args.size, 'default')
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = []
@@ -113,11 +112,11 @@ def main(args):
         if activations is not None:
             print('Calibrate start...')
             with Calibration():
-                calibrate(model, args.device, dataloader,100)
+                calibrate(model, args.device, dataloader)
         print("frozen model")
         freeze(model)
 
-        eval(model, args.device, dataloader, 'quantized')
+        eval(model, args.device, dataloader, args.size, 'quantized')
 
         # Serialize model to a state_dict, save it to disk and reload it
         # weight 저장하기        
@@ -129,28 +128,27 @@ def main(args):
 
     if EVAL:
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-        processor = Processor()
+        processor = Processor(new_shape=(args.size, args.size))
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
         
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}_map.json', 'r') as f:
-            quantization_map = json.load(f)
+            loaded_quantization_map = json.load(f)
 
         yolo =  YOLO(args.model_name)
         yolo.fuse()
         yolo.eval()
-        model_reloaded = Yolov8s(yolo.model.model)
-
-        requantize(model_reloaded, state_dict, quantization_map, args.device)
+        model_reloaded = Yolov8s(yolo.model.model, args.size)
+        requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
         freeze(model_reloaded)
         print("Serialized quantized model")
-        eval(model, args.device, dataloader, 'reloaded')
+        eval(model, args.device, dataloader, args.size, 'reloaded')
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="yolo")
-    parser.add_argument("--prefix", type=str, default="yolo1")
+    parser.add_argument("--prefix", type=str, default="YOLOv8s")
     parser.add_argument("--model_name", type=str, default="yolov8s.pt")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
@@ -162,9 +160,8 @@ if __name__ == '__main__':
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
     parser.add_argument('--eval', action='store_true', help='Enable eval mode')
     parser.add_argument('--no-eval', dest='eval', action='store_false', help='Disable eval mode')
+    parser.add_argument("--size", type=int, default=640, help="target img shape")
     args = parser.parse_args()
     args.device = f'cuda:{args.device}'   
     
     main(args)
-
-

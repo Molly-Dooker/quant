@@ -123,8 +123,9 @@ class C2f(torch.nn.Module):
         return result
 
 class Detect(torch.nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, size=640):
         super().__init__()
+        self.size = size
         self.nl = model.nl
         self.cv2 = model.cv2
         self.cv3 = model.cv3     
@@ -164,10 +165,15 @@ class Detect(torch.nn.Module):
         anchor_points, stride_tensor = [], []
         # assert feats is not None
         device = self.stride.device
-        H=[80,40,20]
-        W=[80,40,20]
+        H=None; W=None;
+        if   self.size == 640:
+            H=[80,40,20]
+            W=[80,40,20]
+        elif self.size == 416:
+            H=[52,26,13]
+            W=[52,26,13]
         for i, stride in enumerate(self.stride):
-            h, w = H[i],W[i]
+            h, w = H[i], W[i]
             sx = torch.arange(end=w, device=device, ) + grid_cell_offset  # shift x
             sy = torch.arange(end=h, device=device, ) + grid_cell_offset  # shift y
             sy, sx = torch.meshgrid(sy, sx, indexing="ij")
@@ -186,7 +192,7 @@ class Detect(torch.nn.Module):
         return torch.cat((c_xy, wh), 1)
 
 class Yolov8s(torch.nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, size=640):
         super().__init__()
         self.m0  = Conv(model[0])
         self.m1  = Conv(model[1])
@@ -210,7 +216,7 @@ class Yolov8s(torch.nn.Module):
         self.m19 = Conv(model[19])
         self.m20 = Concat(model[20])
         self.m21 = C2f(model[21])
-        self.m22 = Detect(model[22])
+        self.m22 = Detect(model[22], size)
 
     def forward(self, x):       
         r0  = self.m0(x)    
