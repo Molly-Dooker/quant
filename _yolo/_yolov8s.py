@@ -124,8 +124,7 @@ class C2f(torch.nn.Module):
 
 class Detect(torch.nn.Module):
     def __init__(self, model, size=640):
-        super().__init__()
-        self.size = size
+        super().__init__()        
         self.nl = model.nl
         self.cv2 = model.cv2
         self.cv3 = model.cv3     
@@ -134,7 +133,7 @@ class Detect(torch.nn.Module):
         self.no  = model.no
         self.reg_max = model.reg_max
         self.nc      = model.nc
-        anchors, strides = self.make_anchors()
+        anchors, strides = self.make_anchors(size)
         self.register_buffer('anchors', anchors.contiguous())
         self.register_buffer('strides', strides.contiguous())
 
@@ -159,21 +158,15 @@ class Detect(torch.nn.Module):
         result = torch.cat((dbox, cls.sigmoid()), 1)
         return result
 
-    def make_anchors(self):
+    def make_anchors(self, size):
         """Generate anchors from features."""
         grid_cell_offset=0.5
         anchor_points, stride_tensor = [], []
         # assert feats is not None
         device = self.stride.device
-        H=None; W=None;
-        if   self.size == 640:
-            H=[80,40,20]
-            W=[80,40,20]
-        elif self.size == 416:
-            H=[52,26,13]
-            W=[52,26,13]
         for i, stride in enumerate(self.stride):
-            h, w = H[i], W[i]
+            h = int(size/stride.item())
+            w = int(size/stride.item())
             sx = torch.arange(end=w, device=device, ) + grid_cell_offset  # shift x
             sy = torch.arange(end=h, device=device, ) + grid_cell_offset  # shift y
             sy, sx = torch.meshgrid(sy, sx, indexing="ij")
