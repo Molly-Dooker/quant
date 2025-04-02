@@ -2,6 +2,7 @@ pip install torch torchvision torchaudio  # torch 2.6
 pip install ultralytics==8.3.97
 pip install optimum==1.24.0
 pip install optimum-quanto==1.24.0
+pip install scikit-learn==1.6.1
 pip install transformers==4.49.0
 pip install evaluate==0.4.3
 pip install accelerate==1.5.2s
