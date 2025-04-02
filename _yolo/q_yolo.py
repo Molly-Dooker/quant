@@ -352,6 +352,7 @@ def eval(model, device, dataloader, prefix=''):
     if len(stats):
         metrics.process(**stats)
     result = metrics.results_dict
+    ipdb.set_trace()
 
 if __name__ == '__main__':
     logger_enable('yolo8s')
