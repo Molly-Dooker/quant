@@ -108,7 +108,6 @@ def main(args):
         activations = keyword_to_itype(args.activations)
         exclude = []
         quantize(model, weights=weights, activations=activations, exclude=exclude)
-
         if activations is not None:
             print('Calibrate start...')
             with Calibration():
@@ -160,7 +159,7 @@ if __name__ == '__main__':
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
     parser.add_argument('--eval', action='store_true', help='Enable eval mode')
     parser.add_argument('--no-eval', dest='eval', action='store_false', help='Disable eval mode')
-    parser.add_argument("--size", type=int, default=640, help="target img shape")
+    parser.add_argument("--size", type=int, default=640, choices=[640, 416])
     args = parser.parse_args()
     args.device = f'cuda:{args.device}'   
     
