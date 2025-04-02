@@ -29,7 +29,7 @@ from optimum.quanto import (
     requantize,
 )
 
-from util import class_names, keyword_to_itype, update_stats
+from _util import class_names, keyword_to_itype, update_stats
 from _yolov8s import Yolov8s
 from _dataloader import Processor, transform, custom_collate_fn
 
