@@ -1,21 +1,17 @@
 import sys
-import ipdb
-from loguru import logger
-from tqdm import tqdm
+from optimum.quanto import (
+    qfloat8,
+    qint4,
+    qint8,
+)
+
+from ultralytics.utils.metrics import  box_iou
+from ultralytics.utils.ops import scale_boxes
 
 import torch
-import numpy as np;
-from datasets import load_dataset
-from ultralytics import YOLO
-from ultralytics.utils.metrics import DetMetrics, box_iou
-from ultralytics.utils.ops import non_max_suppression, scale_boxes
-from torch.fx import symbolic_trace
+import numpy as np
 
-from _yolov8s import Yolov8s
-from _dataloader import Processor, transform, custom_collate_fn
-
-
-names = {
+class_names = {
             0: "person",
             1: "bicycle",
             2: "car",
@@ -97,7 +93,7 @@ names = {
             78: "hair drier",
             79: "toothbrush"
             }
-names_reversed = {v: k for k, v in names.items()}
+names_reversed = {v: k for k, v in class_names.items()}
 mapper = {
     1: "person",
     2: "bicycle",
@@ -181,51 +177,9 @@ mapper = {
     90: "toothbrush"
 }
 
-def logger_enable(prefix=''):
-    global logger
-    logger.remove()
-    LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | {extra[prefix]} | {level} | {message}"
-    logger.add("_logs/log",
-            rotation="500 MB",
-            level="INFO",
-            format=LOG_FORMAT)
 
-    # 콘솔 로거
-    logger.add(sys.stdout,
-            level="INFO",
-            format=LOG_FORMAT)
-    logger = logger.bind(prefix=prefix)
-
-def get_preds(nms):
-    preds=[]
-    for nms_ in nms:
-        pred = dict()        
-        nms_ = nms_.cpu()
-        pred['boxes']=nms_[:,:4]
-        pred['scores']=nms_[:,4]
-        pred['labels']=nms_[:,-1].to(torch.int32)
-        preds.append(pred)
-    return preds
-
-def get_targets(objects):
-    targets=[]
-    for object in objects:
-        target = dict()
-        bboxes = object['bbox']
-        boxes = []
-        for bbox in bboxes:
-            xyxy = torch.tensor([bbox[0],bbox[1],bbox[0]+bbox[2],bbox[1]+bbox[3]])
-            boxes.append(xyxy)
-        if len(boxes)==0: 
-            boxes = torch.tensor([])
-            labels= torch.tensor([],dtype=torch.int32)
-        else:
-            boxes = torch.stack(boxes)
-            labels = torch.tensor(object['label'],dtype=torch.int32)-1
-        target['boxes']=boxes;
-        target['labels']=labels;
-        targets.append(target)
-    return targets;
+def keyword_to_itype(k):
+    return {"none": None, "int4": qint4, "int8": qint8, "float8": qfloat8}[k]
 
 
 def label_mapper(cls):
@@ -298,8 +252,7 @@ def _process_batch(detections, gt_bboxes, gt_cls):
     return result
 
 
-def upate_stats(preds, objects, origin_shapes):
-    global device   
+def update_stats(preds, objects, origin_shapes, stats, device):
     for si, pred in enumerate(preds):
         npr = len(pred)
         stat = dict(
@@ -326,44 +279,35 @@ def upate_stats(preds, objects, origin_shapes):
             stat["tp"] = _process_batch(predn, bbox, cls)
         for k in stats.keys():
             stats[k].append(stat[k])
-        
+    return stats
 
-def eval(model, device, dataloader, prefix=''):    
-    global stats
-    stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
-    nms = lambda predictions: non_max_suppression(prediction=predictions, conf_thres=0.001, iou_thres=0.7, labels=[], nc=80, multi_label=True, agnostic=False, max_det=300, end2end=False, rotated=False)
-    metrics = DetMetrics()
-    metrics.names = names
+# def get_preds(nms):
+#     preds=[]
+#     for nms_ in nms:
+#         pred = dict()        
+#         nms_ = nms_.cpu()
+#         pred['boxes']=nms_[:,:4]
+#         pred['scores']=nms_[:,4]
+#         pred['labels']=nms_[:,-1].to(torch.int32)
+#         preds.append(pred)
+#     return preds
 
-    model.to(device)
-    model.eval()
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader,desc='EVAL..'):
-            img = batch['image'].to(device)
-            objects = batch['objects']
-            # id  = batch['image_id']            
-            origin_shapes = batch['origin_shape']
-            output  = model(img)
-            preds = nms(output)
-            upate_stats(preds, objects, origin_shapes)
-    stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in stats.items()}
-    stats.pop("target_img", None)
-    if len(stats):
-        metrics.process(**stats)
-    result = metrics.results_dict
-
-if __name__ == '__main__':
-    logger_enable('yolo8s')
-    device = 'cuda:3'     
-
-    yolo =  YOLO("yolov8s.pt")
-    yolo.fuse()
-    yolo.eval()
-
-    ds = load_dataset(path='rafaelpadilla/coco2017',cache_dir='/Data/Dataset/COCO',split='val')
-    processor = Processor()
-    prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-    dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=512, shuffle=True, collate_fn=custom_collate_fn)
-    model = Yolov8s(yolo.model.model)
-    eval(model,device,dataloader)
+# def get_targets(objects):
+#     targets=[]
+#     for object in objects:
+#         target = dict()
+#         bboxes = object['bbox']
+#         boxes = []
+#         for bbox in bboxes:
+#             xyxy = torch.tensor([bbox[0],bbox[1],bbox[0]+bbox[2],bbox[1]+bbox[3]])
+#             boxes.append(xyxy)
+#         if len(boxes)==0: 
+#             boxes = torch.tensor([])
+#             labels= torch.tensor([],dtype=torch.int32)
+#         else:
+#             boxes = torch.stack(boxes)
+#             labels = torch.tensor(object['label'],dtype=torch.int32)-1
+#         target['boxes']=boxes;
+#         target['labels']=labels;
+#         targets.append(target)
+#     return targets;
