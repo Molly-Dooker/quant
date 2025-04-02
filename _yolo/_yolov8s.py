@@ -134,8 +134,8 @@ class Detect(torch.nn.Module):
         self.reg_max = model.reg_max
         self.nc      = model.nc
         anchors, strides = self.make_anchors()
-        self.register_buffer('anchors', anchors)
-        self.register_buffer('strides', strides)
+        self.register_buffer('anchors', anchors.contiguous())
+        self.register_buffer('strides', strides.contiguous())
 
     def forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""

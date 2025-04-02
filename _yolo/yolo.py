@@ -4,6 +4,9 @@ import math
 import itertools
 from loguru import logger
 from tqdm import tqdm
+import argparse
+import json
+import os
 
 import torch
 import numpy as np;
@@ -13,6 +16,7 @@ from ultralytics.utils.metrics import DetMetrics, box_iou
 from ultralytics.utils.ops import non_max_suppression, scale_boxes
 from torch.fx import symbolic_trace
 
+from safetensors.torch import load_file, save_file
 from optimum.quanto import (
     Calibration,
     QTensor,
@@ -82,32 +86,85 @@ def logger_enable(prefix=''):
             format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
+def main(args):
+    logger_enable(args.prefix)
+    logger.info('start!')
+    EVAL = args.eval
+
+    if not EVAL:
+        yolo =  YOLO(args.model_name)
+        yolo.fuse()
+        yolo.eval()
+
+        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+        processor = Processor()
+        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
+        model = Yolov8s(yolo.model.model)
+
+        # check default performance
+        # eval(model, args.device, dataloader, 'default')
+
+        weights = keyword_to_itype(args.weights)
+        activations = keyword_to_itype(args.activations)
+        exclude = []
+        quantize(model, weights=weights, activations=activations, exclude=exclude)
+
+        if activations is not None:
+            print('Calibrate start...')
+            with Calibration():
+                calibrate(model, args.device, dataloader,100)
+        print("frozen model")
+        freeze(model)
+
+        eval(model, args.device, dataloader, 'quantized')
+
+        # Serialize model to a state_dict, save it to disk and reload it
+        # weight 저장하기        
+        os.makedirs(args.saveroot,exist_ok=True)
+        save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
+        # qmap 저장하기
+        with open(f'{args.saveroot}/{args.prefix}_map.json', 'w') as f:
+            json.dump(quantization_map(model), f)
+
+    if EVAL:
+        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+        processor = Processor()
+        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
+        
+        state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
+        with open(f'{args.saveroot}/{args.prefix}_map.json', 'r') as f:
+            quantization_map = json.load(f)
+
+        yolo =  YOLO(args.model_name)
+        yolo.fuse()
+        yolo.eval()
+        model_reloaded = Yolov8s(yolo.model.model)
+
+        requantize(model_reloaded, state_dict, quantization_map, args.device)
+        freeze(model_reloaded)
+        print("Serialized quantized model")
+        eval(model, args.device, dataloader, 'reloaded')
+
 if __name__ == '__main__':
-    logger_enable('yolo8s')
-    device = 'cuda:3'     
-    yolo =  YOLO("yolov8s.pt")
-    yolo.fuse()
-    yolo.eval()
 
-    ds = load_dataset(path='rafaelpadilla/coco2017',cache_dir='/Data/Dataset/COCO',split='val')
-    processor = Processor()
-    prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-    dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=128, shuffle=True, collate_fn=custom_collate_fn)
-    model = Yolov8s(yolo.model.model)
-    eval(model,device,dataloader,'default')
+    parser = argparse.ArgumentParser(description="yolo")
+    parser.add_argument("--prefix", type=str, default="yolo1")
+    parser.add_argument("--model_name", type=str, default="yolov8s.pt")
+    parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
+    parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
+    parser.add_argument("--saveroot", type=str, default='./_model')
+    parser.add_argument("--split", type=str, default='val')
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--device", type=int, default=2, help="The device to use for evaluation.")
+    parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
+    parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
+    parser.add_argument('--eval', action='store_true', help='Enable eval mode')
+    parser.add_argument('--no-eval', dest='eval', action='store_false', help='Disable eval mode')
+    args = parser.parse_args()
+    args.device = f'cuda:{args.device}'   
+    
+    main(args)
 
 
-
-    weights = keyword_to_itype('int8')
-    activations = keyword_to_itype('int8')
-    exclude = []
-    quantize(model, weights=weights, activations=activations, exclude=exclude)
-
-    if activations is not None:
-        print('Calibrate start...')
-        with Calibration():
-            calibrate(model, device, dataloader)
-    print("frozen model")
-    freeze(model)
-
-    eval(model,device,dataloader,'quantized')
