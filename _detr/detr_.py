@@ -40,7 +40,6 @@ def eval(model, device, dataloader, processor, prefix=''):
             inputs = {
                 'pixel_values': batch.pop('pixel_values').to(device),
                 'pixel_mask': batch.pop('pixel_mask').to(device)}
-            print(inputs['pixel_values'].shape)
             outputs = model(**inputs)               
             origin_shape = torch.stack([torch.tensor(shape_) for shape_ in batch['origin_shape']])
             results = processor.post_process_object_detection(outputs, target_sizes=origin_shape, threshold=0.001)
@@ -62,13 +61,10 @@ def main(args):
 
     if not EVAL:
         ds = load_dataset(path='rafaelpadilla/coco2017', cache_dir='/Data/Dataset/COCO', split='val')
-        if args.size==-1:
-            processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm")
-        else:
-            processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm", size={"height": args.size, "width": args.size})
+        processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm")
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
-
+        ipdb.set_trace()
         model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50", revision="no_timm")
         fold_frozen_bn_to_identity(model)
 
@@ -92,7 +88,7 @@ if __name__ == '__main__':
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
     parser.add_argument('--eval', action='store_true', help='Enable eval mode')
     parser.add_argument('--no-eval', dest='eval', action='store_false', help='Disable eval mode')
-    parser.add_argument("--size", type=int, default=800)
+    parser.add_argument("--size", type=int, default=800, choices=[800])
     args = parser.parse_args()
     args.device = f'cuda:{args.device}'   
     

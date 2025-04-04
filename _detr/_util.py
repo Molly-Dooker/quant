@@ -180,7 +180,7 @@ mapper = {
 
 
 def transform(data_batch, processor):
-    IMAGE = []; origin_shape = [];
+    origin_shape = []; IMAGE = []; 
     for image in data_batch['image']:
         IMAGE.append(image.convert('RGB'))
         origin_shape.append(image.size[::-1])
@@ -188,7 +188,7 @@ def transform(data_batch, processor):
     inputs["image_id"] = data_batch["image_id"]
     inputs["objects"] = data_batch["objects"]
     inputs['origin_shape']=origin_shape
-    inputs['image']=data_batch['image']
+    # inputs['image']=data_batch['image']
     return inputs
 
 
@@ -198,7 +198,7 @@ def custom_collate_fn(batch):
     image_id = [item['image_id'] for item in batch]
     objects = [item['objects'] for item in batch]
     origin_shape = [item['origin_shape'] for item in batch]
-    image = [item['image'] for item in batch]
+    # image = [item['image'] for item in batch]
     return {
         'pixel_values': pixel_values,
         'pixel_mask': pixel_mask,
@@ -206,7 +206,7 @@ def custom_collate_fn(batch):
         'image_id': image_id,
         'objects':objects,
         'origin_shape':origin_shape,
-        'image':image
+        # 'image':image
     }
 
 
