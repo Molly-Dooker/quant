@@ -116,7 +116,7 @@ def main(args):
                 calibrate(model, args.device, dataloader)
         print("frozen model")
         freeze(model)
-        eval(model, args.device, dataloader, args.size, 'quantized')
+        eval(model, args.device, dataloader, processor, 'quantized')
         os.makedirs(args.saveroot,exist_ok=True)
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         # qmap 저장하기
