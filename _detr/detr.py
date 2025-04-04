@@ -11,90 +11,9 @@ import torch.nn as nn
 from PIL import ImageDraw, ImageFont
 from datasets import load_dataset
 from tqdm import tqdm
+from ultralytics.utils.metrics import DetMetrics
+from _util import class_names, keyword_to_itype, update_stats, get_preds
 
-class_names = {
-            0: "person",
-            1: "bicycle",
-            2: "car",
-            3: "motorcycle",
-            4: "airplane",
-            5: "bus",
-            6: "train",
-            7: "truck",
-            8: "boat",
-            9: "traffic light",
-            10: "fire hydrant",
-            11: "stop sign",
-            12: "parking meter",
-            13: "bench",
-            14: "bird",
-            15: "cat",
-            16: "dog",
-            17: "horse",
-            18: "sheep",
-            19: "cow",
-            20: "elephant",
-            21: "bear",
-            22: "zebra",
-            23: "giraffe",
-            24: "backpack",
-            25: "umbrella",
-            26: "handbag",
-            27: "tie",
-            28: "suitcase",
-            29: "frisbee",
-            30: "skis",
-            31: "snowboard",
-            32: "sports ball",
-            33: "kite",
-            34: "baseball bat",
-            35: "baseball glove",
-            36: "skateboard",
-            37: "surfboard",
-            38: "tennis racket",
-            39: "bottle",
-            40: "wine glass",
-            41: "cup",
-            42: "fork",
-            43: "knife",
-            44: "spoon",
-            45: "bowl",
-            46: "banana",
-            47: "apple",
-            48: "sandwich",
-            49: "orange",
-            50: "broccoli",
-            51: "carrot",
-            52: "hot dog",
-            53: "pizza",
-            54: "donut",
-            55: "cake",
-            56: "chair",
-            57: "couch",
-            58: "potted plant",
-            59: "bed",
-            60: "dining table",
-            61: "toilet",
-            62: "tv",
-            63: "laptop",
-            64: "mouse",
-            65: "remote",
-            66: "keyboard",
-            67: "cell phone",
-            68: "microwave",
-            69: "oven",
-            70: "toaster",
-            71: "sink",
-            72: "refrigerator",
-            73: "book",
-            74: "clock",
-            75: "vase",
-            76: "scissors",
-            77: "teddy bear",
-            78: "hair drier",
-            79: "toothbrush"
-            }
-names_reversed = {v: k for k, v in class_names.items()}
 
 def fold_bn_into_conv(conv: nn.Conv2d, bn: DetrFrozenBatchNorm2d):
     """
@@ -214,9 +133,10 @@ def custom_collate_fn(batch):
     }
 
 
+
 if __name__ == '__main__':
         # ipdb.set_trace()
-        device = 'cuda:2'
+        device = 'cuda:5'
 
         ds = load_dataset(path='rafaelpadilla/coco2017', cache_dir='/Data/Dataset/COCO', split='val')
         processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm", size={"height": 800, "width": 800})
@@ -226,16 +146,28 @@ if __name__ == '__main__':
         model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50", revision="no_timm")
         fold_frozen_bn_to_identity(model)
 
+
+        stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
+        metrics = DetMetrics()
+        metrics.names = class_names
         model.to(device)
         model.eval()  
         with torch.no_grad():
-            for batch in tqdm(dataloader,desc='data'):
+            for batch in tqdm(dataloader,desc='EVAL..'):
+                objects = objects = batch.pop('objects')
                 inputs = {
-                    'pixel_values': batch.get('pixel_values').to(device),
-                    'pixel_mask': batch.get('pixel_mask').to(device)}
+                    'pixel_values': batch.pop('pixel_values').to(device),
+                    'pixel_mask': batch.pop('pixel_mask').to(device)}
                 outputs = model(**inputs)               
                 origin_shape = torch.stack([torch.tensor(shape_) for shape_ in batch['origin_shape']])
                 results = processor.post_process_object_detection(outputs, target_sizes=origin_shape, threshold=0.001)
-                
-
-
+                preds = get_preds(results)
+                stats = update_stats(preds, objects, stats, device)
+        stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in stats.items()}
+        stats.pop("target_img", None)
+        if len(stats):
+            metrics.process(**stats)
+        result = metrics.results_dict
+        mAP50   = result['metrics/mAP50(B)'].item()
+        mAP5095 = result['metrics/mAP50-95(B)'].item()
+        print(mAP50, mAP5095)

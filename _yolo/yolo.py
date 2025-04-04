@@ -103,7 +103,7 @@ def main(args):
         model = Yolov8s(yolo.model.model, args.size)
 
         # check default performance
-        # eval(model, args.device, dataloader, args.size, 'default')
+        eval(model, args.device, dataloader, args.size, 'default')
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = []

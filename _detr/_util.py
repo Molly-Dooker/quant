@@ -10,7 +10,7 @@ from ultralytics.utils.ops import scale_boxes
 
 import torch
 import numpy as np
-
+import ipdb
 class_names = {
             0: "person",
             1: "bicycle",
@@ -200,6 +200,18 @@ def _restore_scale(pred, origin_shape, scaled_shape=(640,640)):
     scale_boxes(scaled_shape, predn[:, :4], origin_shape)
     return predn
 
+
+def get_preds(results):
+    preds=[]
+    for result in results:
+        boxes=result['boxes']; scores=result['scores']; labels=result['labels'].clone().detach().cpu().tolist(); 
+        scores = scores.unsqueeze(1) # shape: (N, 1)
+        labels = torch.tensor(label_mapper(labels)).unsqueeze(1).to(scores.device)
+        pred = torch.cat([boxes, scores, labels], dim=1)
+        preds.append(pred)
+    return preds
+
+
 def _match_predictions(
     pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, use_scipy: bool = False
 ) -> torch.Tensor:
@@ -252,7 +264,9 @@ def _process_batch(detections, gt_bboxes, gt_cls):
     return result
 
 
-def update_stats(preds, objects, origin_shapes, stats, device, size=640):
+
+
+def update_stats(preds, objects, stats, device):
     for si, pred in enumerate(preds):
         npr = len(pred)
         stat = dict(
@@ -260,7 +274,7 @@ def update_stats(preds, objects, origin_shapes, stats, device, size=640):
             pred_cls=torch.zeros(0, device=device),
             tp=torch.zeros(npr, 10, dtype=torch.bool, device=device),
         )            
-        origin_shape = origin_shapes[si]
+        # origin_shape = origin_shapes[si]
         info = objects[si]
         cls  = label_mapper(info['label']).to(device)
         bbox = bbox_mapper(info['bbox']).to(device)
@@ -272,11 +286,11 @@ def update_stats(preds, objects, origin_shapes, stats, device, size=640):
                 for k in stats.keys():
                     stats[k].append(stat[k])
             continue        
-        predn=_restore_scale(pred, origin_shape,(size,size))
-        stat["conf"] = predn[:, 4]
-        stat["pred_cls"] = predn[:, 5]
+        # predn=_restore_scale(pred, origin_shape,(size,size))
+        stat["conf"] = pred[:, 4]
+        stat["pred_cls"] = pred[:, 5]
         if nl:
-            stat["tp"] = _process_batch(predn, bbox, cls)
+            stat["tp"] = _process_batch(pred, bbox, cls)
         for k in stats.keys():
             stats[k].append(stat[k])
     return stats
