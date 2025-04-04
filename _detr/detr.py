@@ -113,7 +113,7 @@ def main(args):
         if activations is not None:
             print('Calibrate start...')
             with Calibration():
-                calibrate(model, args.device, dataloader,10)
+                calibrate(model, args.device, dataloader)
         print("frozen model")
         freeze(model)
         eval(model, args.device, dataloader, args.size, 'quantized')
