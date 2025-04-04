@@ -95,12 +95,15 @@ def fold_frozen_bn_to_identity(model: nn.Module):
     """
     recursive_fold(model)
 
-
+from datasets import load_dataset
 
 if __name__ == '__main__':
+        # ipdb.set_trace()
 
-        url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        image = Image.open(requests.get(url, stream=True).raw)
+        ds = load_dataset(path='rafaelpadilla/coco2017', cache_dir='/Data/Dataset/COCO', split='val')
+        image = ds[0]['image']
+        # url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+        # image = Image.open(requests.get(url, stream=True).raw)
         device = 'cuda:1'
         # you can specify the revision tag if you don't want the timm dependency
         processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm", size={"height": 800, "width": 800})
@@ -115,13 +118,18 @@ if __name__ == '__main__':
             outputs = model(**inputs)
 
         target_sizes = torch.tensor([image.size[::-1]])
+        
         results = processor.post_process_object_detection(outputs, target_sizes=target_sizes, threshold=0.9)[0]
         ipdb.set_trace()
+        # logit = outputs['logits']
+        # box   = outputs['pred_boxes']
+        # ipdb.set_trace()
 
         draw_image = image.copy()
         draw = ImageDraw.Draw(draw_image)
 
         for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
+                print(score,label)
         # 박스 좌표: post_process_object_detection은 픽셀 좌표를 반환합니다.
         # box 좌표는 [x1, y1, x2, y2] 형식입니다.
                 box = [round(i, 2) for i in box.tolist()]
@@ -132,6 +140,7 @@ if __name__ == '__main__':
 
                 # 결과 이미지를 파일로 저장합니다.
                 draw_image.save("detection_result.jpg")
+        ipdb.set_trace()
 
         # for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
         #         box = [round(i, 2) for i in box.tolist()]
