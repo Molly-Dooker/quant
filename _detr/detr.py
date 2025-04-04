@@ -9,6 +9,92 @@ import requests
 import numpy as np
 import torch.nn as nn
 from PIL import ImageDraw, ImageFont
+from datasets import load_dataset
+from tqdm import tqdm
+
+class_names = {
+            0: "person",
+            1: "bicycle",
+            2: "car",
+            3: "motorcycle",
+            4: "airplane",
+            5: "bus",
+            6: "train",
+            7: "truck",
+            8: "boat",
+            9: "traffic light",
+            10: "fire hydrant",
+            11: "stop sign",
+            12: "parking meter",
+            13: "bench",
+            14: "bird",
+            15: "cat",
+            16: "dog",
+            17: "horse",
+            18: "sheep",
+            19: "cow",
+            20: "elephant",
+            21: "bear",
+            22: "zebra",
+            23: "giraffe",
+            24: "backpack",
+            25: "umbrella",
+            26: "handbag",
+            27: "tie",
+            28: "suitcase",
+            29: "frisbee",
+            30: "skis",
+            31: "snowboard",
+            32: "sports ball",
+            33: "kite",
+            34: "baseball bat",
+            35: "baseball glove",
+            36: "skateboard",
+            37: "surfboard",
+            38: "tennis racket",
+            39: "bottle",
+            40: "wine glass",
+            41: "cup",
+            42: "fork",
+            43: "knife",
+            44: "spoon",
+            45: "bowl",
+            46: "banana",
+            47: "apple",
+            48: "sandwich",
+            49: "orange",
+            50: "broccoli",
+            51: "carrot",
+            52: "hot dog",
+            53: "pizza",
+            54: "donut",
+            55: "cake",
+            56: "chair",
+            57: "couch",
+            58: "potted plant",
+            59: "bed",
+            60: "dining table",
+            61: "toilet",
+            62: "tv",
+            63: "laptop",
+            64: "mouse",
+            65: "remote",
+            66: "keyboard",
+            67: "cell phone",
+            68: "microwave",
+            69: "oven",
+            70: "toaster",
+            71: "sink",
+            72: "refrigerator",
+            73: "book",
+            74: "clock",
+            75: "vase",
+            76: "scissors",
+            77: "teddy bear",
+            78: "hair drier",
+            79: "toothbrush"
+            }
+names_reversed = {v: k for k, v in class_names.items()}
 
 def fold_bn_into_conv(conv: nn.Conv2d, bn: DetrFrozenBatchNorm2d):
     """
@@ -95,57 +181,61 @@ def fold_frozen_bn_to_identity(model: nn.Module):
     """
     recursive_fold(model)
 
-from datasets import load_dataset
+
+
+def transform(data_batch, processor):
+    IMAGE = []; origin_shape = [];
+    for image in data_batch['image']:
+        IMAGE.append(image.convert('RGB'))
+        origin_shape.append(image.size[::-1])
+    inputs = processor(IMAGE, return_tensors="pt")
+    inputs["image_id"] = data_batch["image_id"]
+    inputs["objects"] = data_batch["objects"]
+    inputs['origin_shape']=origin_shape
+    inputs['image']=data_batch['image']
+    return inputs
+
+
+def custom_collate_fn(batch):
+    pixel_values = torch.stack([item['pixel_values'] for item in batch])
+    pixel_mask = torch.stack([item['pixel_mask'] for item in batch])
+    image_id = [item['image_id'] for item in batch]
+    objects = [item['objects'] for item in batch]
+    origin_shape = [item['origin_shape'] for item in batch]
+    image = [item['image'] for item in batch]
+    return {
+        'pixel_values': pixel_values,
+        'pixel_mask': pixel_mask,
+        'objects': objects,
+        'image_id': image_id,
+        'objects':objects,
+        'origin_shape':origin_shape,
+        'image':image
+    }
+
 
 if __name__ == '__main__':
         # ipdb.set_trace()
+        device = 'cuda:2'
 
         ds = load_dataset(path='rafaelpadilla/coco2017', cache_dir='/Data/Dataset/COCO', split='val')
-        image = ds[0]['image']
-        # url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        # image = Image.open(requests.get(url, stream=True).raw)
-        device = 'cuda:1'
-        # you can specify the revision tag if you don't want the timm dependency
         processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm", size={"height": 800, "width": 800})
+        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=128, shuffle=False, collate_fn=custom_collate_fn)
+        # ipdb.set_trace()
         model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50", revision="no_timm")
         fold_frozen_bn_to_identity(model)
 
         model.to(device)
-        model.eval()        
-        inputs = processor(images=image, return_tensors="pt").to(device)
-        
+        model.eval()  
         with torch.no_grad():
-            outputs = model(**inputs)
+            for batch in tqdm(dataloader,desc='data'):
+                inputs = {
+                    'pixel_values': batch.get('pixel_values').to(device),
+                    'pixel_mask': batch.get('pixel_mask').to(device)}
+                outputs = model(**inputs)               
+                origin_shape = torch.stack([torch.tensor(shape_) for shape_ in batch['origin_shape']])
+                results = processor.post_process_object_detection(outputs, target_sizes=origin_shape, threshold=0.001)
+                
 
-        target_sizes = torch.tensor([image.size[::-1]])
-        
-        results = processor.post_process_object_detection(outputs, target_sizes=target_sizes, threshold=0.9)[0]
-        ipdb.set_trace()
-        # logit = outputs['logits']
-        # box   = outputs['pred_boxes']
-        # ipdb.set_trace()
 
-        draw_image = image.copy()
-        draw = ImageDraw.Draw(draw_image)
-
-        for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
-                print(score,label)
-        # 박스 좌표: post_process_object_detection은 픽셀 좌표를 반환합니다.
-        # box 좌표는 [x1, y1, x2, y2] 형식입니다.
-                box = [round(i, 2) for i in box.tolist()]
-                draw.rectangle(box, outline="blue", width=2)
-                text = f"{model.config.id2label[label.item()]}: {round(score.item(), 3)}"
-                # 텍스트는 박스의 왼쪽 위에 그립니다.
-                draw.text((box[0], box[1]), text, fill="blue")
-
-                # 결과 이미지를 파일로 저장합니다.
-                draw_image.save("detection_result.jpg")
-        ipdb.set_trace()
-
-        # for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
-        #         box = [round(i, 2) for i in box.tolist()]
-        #         print(
-        #                 f"Detected {model.config.id2label[label.item()]} with confidence "
-        #                 f"{round(score.item(), 3)} at location {box}"
-        #         )
-                        
