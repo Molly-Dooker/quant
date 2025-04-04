@@ -1,6 +1,8 @@
 import ipdb
 import sys
 import argparse
+import math
+import itertools
 from transformers import DetrImageProcessor, DetrForObjectDetection
 from loguru import logger
 from transformers.utils.fx import symbolic_trace
@@ -15,6 +17,20 @@ from tqdm import tqdm
 from ultralytics.utils.metrics import DetMetrics
 from _util import class_names, keyword_to_itype, update_stats, get_preds, transform, custom_collate_fn, fold_frozen_bn_to_identity
 
+from safetensors.torch import load_file, save_file
+from optimum.quanto import (
+    Calibration,
+    QTensor,
+    freeze,
+    qfloat8,
+    qint4,
+    qint8,
+    quantization_map,
+    quantize,
+    requantize,
+)
+import os
+import json
 def logger_enable(prefix=''):
     global logger
     logger.remove()
@@ -40,7 +56,6 @@ def eval(model, device, dataloader, processor, prefix=''):
             inputs = {
                 'pixel_values': batch.pop('pixel_values').to(device),
                 'pixel_mask': batch.pop('pixel_mask').to(device)}
-            print(inputs['pixel_values'].shape)
             outputs = model(**inputs)               
             origin_shape = torch.stack([torch.tensor(shape_) for shape_ in batch['origin_shape']])
             results = processor.post_process_object_detection(outputs, target_sizes=origin_shape, threshold=0.001)
@@ -54,6 +69,19 @@ def eval(model, device, dataloader, processor, prefix=''):
     mAP50   = result['metrics/mAP50(B)'].item()
     mAP5095 = result['metrics/mAP50-95(B)'].item()
     logger.info(f'{prefix} mAP50:{mAP50 : .3f}, mAP50-95 : {mAP5095:.3f}')
+
+
+def calibrate(model, device, dataloader, num=10000):
+    model.to(device)
+    model.eval()  
+    iter = math.ceil(num/dataloader.batch_size)
+    with torch.no_grad():
+        for batch in tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating..."):
+            inputs = {
+                'pixel_values': batch.pop('pixel_values').to(device),
+                'pixel_mask': batch.pop('pixel_mask').to(device)}
+            _ = model(**inputs)               
+
 
 def main(args):
     logger_enable(args.prefix)
@@ -73,9 +101,27 @@ def main(args):
         fold_frozen_bn_to_identity(model)
 
         # base model evaluation
-        eval(model,args.device,dataloader,processor,'default')
-
-
+        # eval(model,args.device,dataloader,processor,'default')
+        weights = keyword_to_itype(args.weights)
+        activations = keyword_to_itype(args.activations)
+        exclude = ['class_labels_classifier',
+                   'bbox_predictor.layers.0',
+                   'bbox_predictor.layers.1',
+                   'bbox_predictor.layers.2',
+                   ]
+        quantize(model, weights=weights, activations=activations, exclude=exclude)
+        if activations is not None:
+            print('Calibrate start...')
+            with Calibration():
+                calibrate(model, args.device, dataloader,10)
+        print("frozen model")
+        freeze(model)
+        eval(model, args.device, dataloader, args.size, 'quantized')
+        os.makedirs(args.saveroot,exist_ok=True)
+        save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
+        # qmap 저장하기
+        with open(f'{args.saveroot}/{args.prefix}_map.json', 'w') as f:
+            json.dump(quantization_map(model), f)
 
 if __name__ == '__main__':
         
@@ -86,7 +132,7 @@ if __name__ == '__main__':
     # parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
     parser.add_argument("--saveroot", type=str, default='./_model')
     # parser.add_argument("--split", type=str, default='val')
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--device", type=int, default=2, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
