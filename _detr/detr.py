@@ -93,7 +93,7 @@ def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
     EVAL = args.eval
-
+    STAT = args.stat
     if not EVAL:
 
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
@@ -105,7 +105,16 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
-
+        if STAT:
+            from _stats import register_hook_default, unregister_hook_default, get_stats
+            register_hook_default(model)
+            calibrate(model, args.device, dataloader)
+            stats = get_stats()
+            os.makedirs('_stats',exist_ok=True)
+            with open(f'_stats/{args.prefix}_default.json', "w") as f:
+                json.dump(stats, f, indent=2)
+            unregister_hook_default(model)
+        ipdb.set_trace()
         # base model evaluation
         # eval(model,args.device,dataloader,processor,'default')
         weights = keyword_to_itype(args.weights)
@@ -166,6 +175,10 @@ if __name__ == '__main__':
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
     parser.add_argument('--eval', action='store_true', help='Enable eval mode')
     parser.add_argument('--no-eval', dest='eval', action='store_false', help='Disable eval mode')
+
+    parser.add_argument('--stat', action='store_true', help='Enable stat mode')
+    parser.add_argument('--no-stat', dest='stat', action='store_false', help='Disable stat mode')
+
     parser.add_argument("--size", type=int, default=800)
     args = parser.parse_args()
     args.device = f'cuda:{args.device}'   
