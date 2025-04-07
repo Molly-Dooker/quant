@@ -8,7 +8,8 @@ class OnlineStats:
         self.n = 0
         self.mean = 0.0
         self.M2 = 0.0
-
+        self.total = 0;
+        self.out_count = 0;
     def update_batch(self, x: torch.Tensor):
         """
         x: 배치 단위의 activation 텐서. (예: [batch, ...])
@@ -57,19 +58,44 @@ class OnlineStats:
         std = np.sqrt(sample_var).item()
         return self.mean, std
 
+    def get_outlier_stats(self, x):
+        """
+        x: 배치 단위의 activation 텐서. (예: [batch, ...])
+        전체 요소(flattened) 기준으로 평균과 분산을 계산하고, 누적 통계를 업데이트합니다.
+        또한, 배치 데이터를 별도로 저장합니다.
+        """
+        thresh = 3.0;
+        lower_bound = self.mean - thresh * self.std
+        upper_bound = self.mean + thresh * self.std
+        outlier_mask = (x < lower_bound) | (x > upper_bound)
+        outlier_count = outlier_mask.sum().item()
+        total_elements = x.numel()
+        self.total+=total_elements
+        self.out_count +=outlier_count;
 module_stats = defaultdict(OnlineStats)
 
 def online_stats_hook(module, inputs):
     activation = inputs[0]
     module_stats[id(module)].update_batch(activation)
 
+def online_stats_hook_outlier(module, inputs):
+    activation = inputs[0]
+    module_stats[id(module)].get_outlier_stats(activation)
 
-def register_hook_default(model):
+
+def register_hook_default(model,data=None):
     for name, m in model.named_modules():
         if not isinstance(m, (Conv2d, Linear)): continue
         module_stats[id(m)].name = name
+        if data is not None:
+            module_stats[id(m)].mean = data[name]['mean']; 
+            module_stats[id(m)].std  = data[name]['std'];        
         m._stat_hooks = {}
-        m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook)
+        if data is not None:
+            m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook_outlier)
+        else:
+            m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook)
+
         
 def unregister_hook_default(model):
     for name, m in model.named_modules():
@@ -77,10 +103,13 @@ def unregister_hook_default(model):
         m._stat_hooks["input"].remove()
         del m._stat_hooks
 
-def register_hook_quantized(model):
+def register_hook_quantized(model, data):
     for name, m in model.named_modules():
         if not isinstance(m, (QConv2d, QLinear)): continue
         module_stats[id(m)].name = name
+        if data is not None:
+            module_stats[id(m)].mean = data[name]['mean']; 
+            module_stats[id(m)].std  = data[name]['std']; 
         m._stat_hooks = {}
         m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook)
         
@@ -100,6 +129,16 @@ def get_stats():
         }
     return stats_by_module_name
 
+def get_outlier():
+    stats_by_module_name = {}
+    for module_id, stats in module_stats.items():
+        outlier_ratio = stats.out_count/stats.total
+        stats_by_module_name[stats.name]={
+            "outlier_ratio": outlier_ratio,
+            'out_cout': stats.out_count,
+            "total": stats.total
+        }
+    return stats_by_module_name
 
 
 ## how to use
@@ -126,3 +165,18 @@ def get_stats():
 #     unregister_hook_quantized(model)  
 # else:
 #     eval(model, args.device, dataloader, processor, 'quantized')
+
+
+# 앞에꺼 먼저 하고 아웃라이어 개수, 비율 계산
+# if STAT:
+#     with open('_stats/stat_default.json', "r") as f:
+#         data = json.load(f)
+#     from _stats import register_hook_default, unregister_hook_default, get_stats, get_outlier
+#     register_hook_default(model,data)
+#     calibrate(model, args.device, dataloader)  
+#     ipdb.set_trace()  
+#     outs = get_outlier()
+#     os.makedirs('_stats',exist_ok=True)
+#     with open(f'_stats/{args.prefix}_default_outlier.json', "w") as f:
+#         json.dump(outs, f, indent=2)
+#     unregister_hook_default(model)

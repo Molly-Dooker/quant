@@ -93,6 +93,7 @@ def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
     EVAL = args.eval
+    STAT = args.stat
     if not EVAL:
 
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
@@ -104,6 +105,20 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
+        if STAT:
+            with open('_stats/stat_default.json', "r") as f:
+                data = json.load(f)
+            from _stats import register_hook_default, unregister_hook_default, get_stats, get_outlier
+            register_hook_default(model,data)
+            calibrate(model, args.device, dataloader)  
+            ipdb.set_trace()  
+            outs = get_outlier()
+            os.makedirs('_stats',exist_ok=True)
+            with open(f'_stats/{args.prefix}_default_outlier.json', "w") as f:
+                json.dump(outs, f, indent=2)
+            unregister_hook_default(model)
+        ipdb.set_trace()
+        
         # base model evaluation
         # eval(model,args.device,dataloader,processor,'default')
         weights = keyword_to_itype(args.weights)
@@ -160,7 +175,7 @@ def main(args):
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description="detr")
-    parser.add_argument("--prefix", type=str, default="exclude4")
+    parser.add_argument("--prefix", type=str, default="test1")
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
