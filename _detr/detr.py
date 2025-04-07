@@ -33,17 +33,18 @@ from optimum.quanto import (
 from optimum.quanto.nn import QConv2d, QLinear, QModuleMixin
 import os
 import json
+
+
+
 def logger_enable(prefix=''):
+    def console_filter(record):
+        # extra에 file_only가 True인 경우 콘솔 출력 제외
+        return not record["extra"].get("file_only", False)
     global logger
     logger.remove()
     LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | {extra[prefix]} | {level} | {message}"
-    logger.add("_logs/log",
-            rotation="500 MB",
-            level="INFO",
-            format=LOG_FORMAT)
-    logger.add(sys.stdout,
-            level="INFO",
-            format=LOG_FORMAT)
+    logger.add(sys.stdout, level="INFO", format=LOG_FORMAT, filter=console_filter)
+    logger.add("_logs/log", rotation="500 MB", level="INFO", format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
 def eval(model, device, dataloader, processor, prefix=''):
@@ -53,7 +54,9 @@ def eval(model, device, dataloader, processor, prefix=''):
     model.to(device)
     model.eval()  
     with torch.no_grad():
-        for batch in tqdm(dataloader,desc='EVAL..'):
+        total_batch = len(dataloader)
+        for idx, batch in enumerate(tqdm(dataloader,desc='EVAL..')):
+            logger.bind(file_only=True).info(f'eval... {idx+1}/{total_batch}')
             objects = objects = batch.pop('objects')
             inputs = {
                 'pixel_values': batch.pop('pixel_values').to(device),
@@ -78,7 +81,8 @@ def calibrate(model, device, dataloader, num=10000):
     model.eval()  
     iter = math.ceil(num/dataloader.batch_size)
     with torch.no_grad():
-        for batch in tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating..."):
+        for idx, batch in enumerate(tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating...")):
+            logger.bind(file_only=True).info(f'calibrate... {idx+1}/{iter}')
             inputs = {
                 'pixel_values': batch.pop('pixel_values').to(device),
                 'pixel_mask': batch.pop('pixel_mask').to(device)}
@@ -99,7 +103,6 @@ def main(args):
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
-
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
 
@@ -116,11 +119,11 @@ def main(args):
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
 
         if activations is not None:
-            print('Calibrate start...')
+            logger.info('Calibrate start...')
             # with Calibration(): 
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
-        print("frozen model")        
+        logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
         os.makedirs(args.saveroot,exist_ok=True)
@@ -145,20 +148,20 @@ def main(args):
             loaded_quantization_map = json.load(f)
         requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
         freeze(model_reloaded)
-        print("Serialized quantized model")
+        logger.info("Serialized quantized model")
         eval(model_reloaded, args.device, dataloader, args.size, 'reloaded')
-
+        logger.info("end!")
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description="detr")
-    parser.add_argument("--prefix", type=str, default="detr")
+    parser.add_argument("--prefix", type=str, default="test2")
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
     parser.add_argument("--saveroot", type=str, default='./_model')
     parser.add_argument("--split", type=str, default='val')
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--device", type=int, default=2, help="The device to use for evaluation.")
+    parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
     parser.add_argument('--eval', action='store_true', help='Enable eval mode')
