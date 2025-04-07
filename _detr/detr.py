@@ -16,7 +16,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from ultralytics.utils.metrics import DetMetrics
 from _util import class_names, keyword_to_itype, update_stats, get_preds, transform, custom_collate_fn, fold_frozen_bn_to_identity
-
+from _quanto import _quantize, _Calibration
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
     Calibration,
@@ -28,7 +28,9 @@ from optimum.quanto import (
     quantization_map,
     quantize,
     requantize,
+    quantize_activation
 )
+from optimum.quanto.nn import QConv2d, QLinear, QModuleMixin
 import os
 import json
 def logger_enable(prefix=''):
@@ -109,10 +111,13 @@ def main(args):
                    'bbox_predictor.layers.1',
                    'bbox_predictor.layers.2',
                    ]
-        quantize(model, weights=weights, activations=activations, exclude=exclude)
+        # quantize(model, weights=weights, activations=activations, exclude=exclude)
+        _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
+
         if activations is not None:
             print('Calibrate start...')
-            with Calibration():
+            # with Calibration(): 
+            with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
         print("frozen model")
         freeze(model)
