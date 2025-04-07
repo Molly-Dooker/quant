@@ -93,7 +93,6 @@ def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
     EVAL = args.eval
-    STAT = args.stat
     if not EVAL:
 
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
@@ -114,10 +113,14 @@ def main(args):
                    'bbox_predictor.layers.1',
                    'bbox_predictor.layers.2',
                    ]
-        exclude = []
+        exclude = ['model.decoder.layers.1.encoder_attn.q_proj',
+                   'model.decoder.layers.2.encoder_attn.q_proj',
+                   'model.decoder.layers.3.encoder_attn.q_proj',
+                   'model.decoder.layers.4.encoder_attn.q_proj',
+                   'model.decoder.layers.5.encoder_attn.q_proj',
+                   ]
         # quantize(model, weights=weights, activations=activations, exclude=exclude)
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
-
         if activations is not None:
             logger.info('Calibrate start...')
             # with Calibration(): 
@@ -125,18 +128,7 @@ def main(args):
                 calibrate(model, args.device, dataloader)
         logger.info('frozen model')    
         freeze(model)
-        if STAT:
-            logger.info('STAT!')
-            from _stats import register_hook_quantized, unregister_hook_quantized, get_stats
-            register_hook_quantized(model)    
-            eval(model, args.device, dataloader, processor, 'quantized')    
-            stats = get_stats()        
-            os.makedirs('_stats',exist_ok=True)
-            with open(f'_stats/{args.prefix}_quantized.json', "w") as f:
-                json.dump(stats, f, indent=2)
-            unregister_hook_quantized(model)  
-        else:
-            eval(model, args.device, dataloader, processor, 'quantized')
+        eval(model, args.device, dataloader, processor, 'quantized')
         os.makedirs(args.saveroot,exist_ok=True)
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         # qmap 저장하기
@@ -165,7 +157,7 @@ def main(args):
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description="detr")
-    parser.add_argument("--prefix", type=str, default="test2")
+    parser.add_argument("--prefix", type=str, default="exclude4")
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
