@@ -2,7 +2,7 @@ from collections import defaultdict
 import numpy as np
 import torch 
 from torch.nn import Conv2d, Linear
-
+from optimum.quanto.nn import QLinear, QConv2d
 class OnlineStats:
     def __init__(self):
         self.n = 0
@@ -77,6 +77,19 @@ def unregister_hook_default(model):
         m._stat_hooks["input"].remove()
         del m._stat_hooks
 
+def register_hook_quantized(model):
+    for name, m in model.named_modules():
+        if not isinstance(m, (QConv2d, QLinear)): continue
+        module_stats[id(m)].name = name
+        m._stat_hooks = {}
+        m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook)
+        
+def unregister_hook_quantized(model):
+    for name, m in model.named_modules():
+        if not isinstance(m, (QConv2d, QLinear)): continue
+        m._stat_hooks["input"].remove()
+        del m._stat_hooks
+
 def get_stats():
     stats_by_module_name = {}
     for module_id, stats in module_stats.items():
@@ -87,3 +100,29 @@ def get_stats():
         }
     return stats_by_module_name
 
+
+
+## how to use
+
+# if STAT:
+#     from _stats import register_hook_default, unregister_hook_default, get_stats
+#     register_hook_default(model)
+#     calibrate(model, args.device, dataloader)
+#     stats = get_stats()
+#     os.makedirs('_stats',exist_ok=True)
+#     with open(f'_stats/{args.prefix}_default.json', "w") as f:
+#         json.dump(stats, f, indent=2)
+#     unregister_hook_default(model)
+
+
+# if STAT:
+#     from _stats import register_hook_quantized, unregister_hook_quantized, get_stats
+#     register_hook_quantized(model)    
+#     eval(model, args.device, dataloader, processor, 'quantized')    
+#     stats = get_stats()        
+#     os.makedirs('_stats',exist_ok=True)
+#     with open(f'_stats/{args.prefix}_quantized.json', "w") as f:
+#         json.dump(stats, f, indent=2)
+#     unregister_hook_quantized(model)  
+# else:
+#     eval(model, args.device, dataloader, processor, 'quantized')

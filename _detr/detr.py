@@ -105,16 +105,6 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
-        if STAT:
-            from _stats import register_hook_default, unregister_hook_default, get_stats
-            register_hook_default(model)
-            calibrate(model, args.device, dataloader)
-            stats = get_stats()
-            os.makedirs('_stats',exist_ok=True)
-            with open(f'_stats/{args.prefix}_default.json', "w") as f:
-                json.dump(stats, f, indent=2)
-            unregister_hook_default(model)
-        ipdb.set_trace()
         # base model evaluation
         # eval(model,args.device,dataloader,processor,'default')
         weights = keyword_to_itype(args.weights)
@@ -124,6 +114,7 @@ def main(args):
                    'bbox_predictor.layers.1',
                    'bbox_predictor.layers.2',
                    ]
+        exclude = []
         # quantize(model, weights=weights, activations=activations, exclude=exclude)
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
 
@@ -134,7 +125,18 @@ def main(args):
                 calibrate(model, args.device, dataloader)
         logger.info('frozen model')    
         freeze(model)
-        eval(model, args.device, dataloader, processor, 'quantized')
+        if STAT:
+            logger.info('STAT!')
+            from _stats import register_hook_quantized, unregister_hook_quantized, get_stats
+            register_hook_quantized(model)    
+            eval(model, args.device, dataloader, processor, 'quantized')    
+            stats = get_stats()        
+            os.makedirs('_stats',exist_ok=True)
+            with open(f'_stats/{args.prefix}_quantized.json', "w") as f:
+                json.dump(stats, f, indent=2)
+            unregister_hook_quantized(model)  
+        else:
+            eval(model, args.device, dataloader, processor, 'quantized')
         os.makedirs(args.saveroot,exist_ok=True)
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         # qmap 저장하기
