@@ -108,20 +108,24 @@ def main(args):
         # eval(model,args.device,dataloader,processor,'default')
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
+        # exclude = ['class_labels_classifier',
+        #            'bbox_predictor.layers.0',
+        #            'bbox_predictor.layers.1',
+        #            'bbox_predictor.layers.2',
+        #            'model.backbone.conv_encoder.model.encoder.stages.0.layers.2.layer.2.convolution',
+        #            'model.encoder.layers.0.self_attn.out_proj',
+        #            'model.backbone.conv_encoder.model.encoder.stages.1.layers.0.layer.1.convolution'
+        #            ]
         exclude = ['class_labels_classifier',
                    'bbox_predictor.layers.0',
                    'bbox_predictor.layers.1',
                    'bbox_predictor.layers.2',
-                   'model.backbone.conv_encoder.model.encoder.stages.0.layers.2.layer.2.convolution',
-                   'model.encoder.layers.0.self_attn.out_proj',
-                   'model.backbone.conv_encoder.model.encoder.stages.1.layers.0.layer.1.convolution'
+                   'model.decoder.layers.1.encoder_attn.q_proj',
+                   'model.decoder.layers.2.encoder_attn.q_proj',
+                   'model.decoder.layers.3.encoder_attn.q_proj',
+                   'model.decoder.layers.4.encoder_attn.q_proj',
+                   'model.decoder.layers.5.encoder_attn.q_proj',
                    ]
-        # exclude = ['model.decoder.layers.1.encoder_attn.q_proj',
-        #            'model.decoder.layers.2.encoder_attn.q_proj',
-        #            'model.decoder.layers.3.encoder_attn.q_proj',
-        #            'model.decoder.layers.4.encoder_attn.q_proj',
-        #            'model.decoder.layers.5.encoder_attn.q_proj',
-        #            ]
         # quantize(model, weights=weights, activations=activations, exclude=exclude)
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
         if activations is not None:
