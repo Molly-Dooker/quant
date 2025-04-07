@@ -12,7 +12,7 @@ from torch.nn.modules.module import  register_module_forward_hook, register_modu
 from torch.overrides import TorchFunctionMode
 from optimum.quanto import absmax_scale, QTensor
 from optimum.quanto.calibrate import _updated_scale
-
+import types
 def _quantize_input(module: torch.nn.Module, input: torch.Tensor) -> torch.Tensor:
     input = input[0]
     if isinstance(input, ActivationQBytesTensor):
@@ -24,6 +24,21 @@ def _quantize_input(module: torch.nn.Module, input: torch.Tensor) -> torch.Tenso
     else:
         input = quantize_activation(input, qtype=module.activation_qtype, scale=module.input_scale)
     return input
+
+
+def _save_to_state_dict(self, destination, prefix, keep_vars):
+    if self.weight_qtype is None or not self.frozen:
+        # Save standard weight Tensor
+        destination[prefix + "weight"] = (
+            self.weight if (self.weight is None or keep_vars) else self.weight.detach()
+        )
+    else:
+        # Save QTensor using dedicated method
+        self.weight.save_to_state_dict(destination, prefix + "weight.", keep_vars)
+    if self.bias is not None:
+        destination[prefix + "bias"] = self.bias if keep_vars else self.bias.detach()
+    destination[prefix + "input_scale"] = self.input_scale if keep_vars else self.input_scale.detach()
+    # destination[prefix + "output_scale"] = self.output_scale if keep_vars else self.output_scale.detach()
 
 def _quantize(
     model: torch.nn.Module,
@@ -72,13 +87,12 @@ def _quantize(
         _quantize_submodule(model, name, m, weights=weights, activations=activations, optimizer=optimizer)
 
     for name, m in model.named_modules():
-
-        if isinstance(m,QModuleMixin): 
-            m.disable_output_quantization()
-            m._quantize_hooks.pop("output", None)
-            del m._buffers["output_scale"]
-        if isinstance(m, QConv2d): 
-            m._quantize_hooks["input"] = m.register_forward_pre_hook(_quantize_input)
+        if not isinstance(m,QModuleMixin): continue
+        m.disable_output_quantization()
+        m._quantize_hooks.pop("output", None)
+        del m._buffers["output_scale"]
+        if isinstance(m, QConv2d): m._quantize_hooks["input"] = m.register_forward_pre_hook(_quantize_input)        
+        m._save_to_state_dict = types.MethodType(_save_to_state_dict, m)
 
 class _Calibration(TorchFunctionMode):
     """A custom torch dispatch mode to calibrate quantized modules.

@@ -91,15 +91,16 @@ def main(args):
     EVAL = args.eval
 
     if not EVAL:
-        ds = load_dataset(path='rafaelpadilla/coco2017', cache_dir='/Data/Dataset/COCO', split='val')
+
+        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         if args.size==-1:
-            processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm")
+            processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
         else:
-            processor = DetrImageProcessor().from_pretrained("facebook/detr-resnet-50", revision="no_timm", size={"height": args.size, "width": args.size})
+            processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
 
-        model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50", revision="no_timm")
+        model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
 
         # base model evaluation
@@ -119,7 +120,7 @@ def main(args):
             # with Calibration(): 
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
-        print("frozen model")
+        print("frozen model")        
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
         os.makedirs(args.saveroot,exist_ok=True)
@@ -127,16 +128,35 @@ def main(args):
         # qmap 저장하기
         with open(f'{args.saveroot}/{args.prefix}_map.json', 'w') as f:
             json.dump(quantization_map(model), f)
+        logger.info('end!')
+    if EVAL:
+        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+        if args.size==-1:
+            processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
+        else:
+            processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
+        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
+
+        model_reloaded = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
+        fold_frozen_bn_to_identity(model_reloaded)
+        state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
+        with open(f'{args.saveroot}/{args.prefix}_map.json', 'r') as f:
+            loaded_quantization_map = json.load(f)
+        requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
+        freeze(model_reloaded)
+        print("Serialized quantized model")
+        eval(model_reloaded, args.device, dataloader, args.size, 'reloaded')
 
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description="detr")
     parser.add_argument("--prefix", type=str, default="detr")
-    # parser.add_argument("--model_name", type=str, default="yolov8s.pt")
-    # parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
-    # parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
+    parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
+    parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
+    parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
     parser.add_argument("--saveroot", type=str, default='./_model')
-    # parser.add_argument("--split", type=str, default='val')
+    parser.add_argument("--split", type=str, default='val')
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--device", type=int, default=2, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
