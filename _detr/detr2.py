@@ -16,7 +16,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from ultralytics.utils.metrics import DetMetrics
 from _util import class_names, keyword_to_itype, update_stats, get_preds, transform, custom_collate_fn, fold_frozen_bn_to_identity
-from _quanto import _quantize, _Calibration
+from _quanto import _quantize, _Calibration, _requantize
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
     Calibration,
@@ -93,6 +93,7 @@ def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
     EVAL = args.eval
+    STAT = args.stat
     if not EVAL:
 
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
@@ -104,35 +105,77 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
+        
+
+        model2 = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
+        fold_frozen_bn_to_identity(model2)
+        state_dict = load_file(f'{args.saveroot}/default_quant.safetensors')
+        with open(f'{args.saveroot}/default_quant_map.json', 'r') as f:
+            loaded_quantization_map = json.load(f)        
+        _requantize(model2, state_dict, loaded_quantization_map)
+        freeze(model2)
+
+        RMSE = dict()
+        data= dict()
+        def prehook(module, inputs):
+            activation = inputs[0].detach().cpu()
+            data[module.name]={'input':activation}
+        def hook(module, inputs, outputs):            
+            data[module.name]['output']=outputs.detach().cpu()
+
+        model.to('cuda:2')
+        model.eval()  
+        for name, m in model.named_modules():
+            if isinstance(m,(nn.Conv2d, nn.Linear)):
+                m._hooks=dict()
+                m.name = name
+                m._hooks['prehook'] = m.register_forward_pre_hook(prehook)
+                m._hooks['hook']    = m.register_forward_hook(hook)
+        model2.to('cuda:3')
+        model2.eval()  
+        with torch.no_grad():
+            for batch in tqdm(dataloader, desc='calibrate'):
+                inputs = {
+                    'pixel_values': batch.pop('pixel_values').to('cuda:2'),
+                    'pixel_mask': batch.pop('pixel_mask').to('cuda:2')}
+                _ = model(**inputs)    
+                for name, m in model2.named_modules():
+                    if isinstance(m,(QConv2d, QLinear)):                        
+                        input = data[name]['input'].to('cuda:3')
+                        output = m(input)
+                        output_ = data[name]['output'].to('cuda:3')
+                        rmse = torch.sqrt(torch.mean((output-output_)**2)).detach().cpu().item()
+                        RMSE.setdefault(name, []).append(rmse)
+                ipdb.set_trace()
+        ipdb.set_trace()
+
+
+
+        eval(model, args.device, dataloader, processor, 'quantized')
+
+        #  디폴트 의 conv2d linear 에 hook 과 prehook 을 넣어서 각 input 과 output 을 잡아서 모델 이름에 대해 dict에 넣음
+        # quant 모델을 순환하며 dict 의 keyname 과 같은 레이어에 input을 넣고 output을 가져와서 rms 함 
+
+
         # base model evaluation
         # eval(model,args.device,dataloader,processor,'default')
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
+        exclude = []
+        if args.exclude is not None:
+            exclude = [ x for x in args.exclude.replace(' ','').split(',') ]    
+        logger.info(f'exclude : {exclude}')        
         # exclude = ['class_labels_classifier',
         #            'bbox_predictor.layers.0',
         #            'bbox_predictor.layers.1',
         #            'bbox_predictor.layers.2',
-        #            'model.backbone.conv_encoder.model.encoder.stages.0.layers.2.layer.2.convolution',
-        #            'model.encoder.layers.0.self_attn.out_proj',
-        #            'model.backbone.conv_encoder.model.encoder.stages.1.layers.0.layer.1.convolution'
-        #            ]
-        exclude = ['class_labels_classifier',
-                   'bbox_predictor.layers.0',
-                   'bbox_predictor.layers.1',
-                   'bbox_predictor.layers.2',
-                   'model.decoder.layers.1.encoder_attn.q_proj',
-                   'model.decoder.layers.2.encoder_attn.q_proj',
-                   'model.decoder.layers.3.encoder_attn.q_proj',
-                   'model.decoder.layers.4.encoder_attn.q_proj',
-                   'model.decoder.layers.5.encoder_attn.q_proj',
-                   ]
-        # quantize(model, weights=weights, activations=activations, exclude=exclude)
+        # ]
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
         if activations is not None:
             logger.info('Calibrate start...')
             # with Calibration(): 
             with _Calibration(): # custom Calibration
-                calibrate(model, args.device, dataloader)
+                calibrate(model, args.device, dataloader,10)
         logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
@@ -164,7 +207,7 @@ def main(args):
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description="detr")
-    parser.add_argument("--prefix", type=str, default="exclude4")
+    parser.add_argument("--prefix", type=str, default="test1")
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
@@ -181,6 +224,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-stat', dest='stat', action='store_false', help='Disable stat mode')
 
     parser.add_argument("--size", type=int, default=800)
+    parser.add_argument('--exclude', type=str, required=False, help='')
     args = parser.parse_args()
     args.device = f'cuda:{args.device}'   
     

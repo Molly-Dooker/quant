@@ -16,7 +16,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from ultralytics.utils.metrics import DetMetrics
 from _util import class_names, keyword_to_itype, update_stats, get_preds, transform, custom_collate_fn, fold_frozen_bn_to_identity
-from _quanto import _quantize, _Calibration
+from _quanto import _quantize, _Calibration, _requantize
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
     Calibration,
@@ -105,45 +105,25 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
-        if STAT:
-            with open('_stats/stat_default.json', "r") as f:
-                data = json.load(f)
-            from _stats import register_hook_default, unregister_hook_default, get_stats, get_outlier
-            register_hook_default(model,data)
-            calibrate(model, args.device, dataloader)  
-            ipdb.set_trace()  
-            outs = get_outlier()
-            os.makedirs('_stats',exist_ok=True)
-            with open(f'_stats/{args.prefix}_default_outlier.json', "w") as f:
-                json.dump(outs, f, indent=2)
-            unregister_hook_default(model)
-        ipdb.set_trace()
-        
         # base model evaluation
         # eval(model,args.device,dataloader,processor,'default')
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
-        exclude = ['class_labels_classifier',
-                   'bbox_predictor.layers.0',
-                   'bbox_predictor.layers.1',
-                   'bbox_predictor.layers.2',
-                   'model.backbone.conv_encoder.model.encoder.stages.0.layers.2.layer.2.convolution',
-                   'model.encoder.layers.0.self_attn.out_proj',
-                   'model.backbone.conv_encoder.model.encoder.stages.1.layers.0.layer.1.convolution'
-                   ]
-        # exclude = ['model.decoder.layers.1.encoder_attn.q_proj',
-        #            'model.decoder.layers.2.encoder_attn.q_proj',
-        #            'model.decoder.layers.3.encoder_attn.q_proj',
-        #            'model.decoder.layers.4.encoder_attn.q_proj',
-        #            'model.decoder.layers.5.encoder_attn.q_proj',
-        #            ]
-        # quantize(model, weights=weights, activations=activations, exclude=exclude)
+        exclude = []
+        if args.exclude is not None:
+            exclude = [ x for x in args.exclude.replace(' ','').split(',') ]    
+        logger.info(f'exclude : {exclude}')        
+        # exclude = ['class_labels_classifier',
+        #            'bbox_predictor.layers.0',
+        #            'bbox_predictor.layers.1',
+        #            'bbox_predictor.layers.2',
+        # ]
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
         if activations is not None:
             logger.info('Calibrate start...')
             # with Calibration(): 
             with _Calibration(): # custom Calibration
-                calibrate(model, args.device, dataloader)
+                calibrate(model, args.device, dataloader,10)
         logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
@@ -167,7 +147,7 @@ def main(args):
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}_map.json', 'r') as f:
             loaded_quantization_map = json.load(f)
-        requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
+        _requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
         freeze(model_reloaded)
         logger.info("Serialized quantized model")
         eval(model_reloaded, args.device, dataloader, args.size, 'reloaded')
@@ -192,6 +172,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-stat', dest='stat', action='store_false', help='Disable stat mode')
 
     parser.add_argument("--size", type=int, default=800)
+    parser.add_argument('--exclude', type=str, required=False, help='')
     args = parser.parse_args()
     args.device = f'cuda:{args.device}'   
     

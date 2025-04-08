@@ -108,10 +108,13 @@ def register_hook_quantized(model, data):
         if not isinstance(m, (QConv2d, QLinear)): continue
         module_stats[id(m)].name = name
         if data is not None:
-            module_stats[id(m)].mean = data[name]['mean']; 
-            module_stats[id(m)].std  = data[name]['std']; 
+            module_stats[id(m)].mean = data[name]['mean']
+            module_stats[id(m)].std  = data[name]['std']
         m._stat_hooks = {}
-        m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook)
+        if data is not None:
+            m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook_outlier)
+        else:
+            m._stat_hooks["input"] = m.register_forward_pre_hook(online_stats_hook)
         
 def unregister_hook_quantized(model):
     for name, m in model.named_modules():
@@ -174,9 +177,9 @@ def get_outlier():
 #     from _stats import register_hook_default, unregister_hook_default, get_stats, get_outlier
 #     register_hook_default(model,data)
 #     calibrate(model, args.device, dataloader)  
-#     ipdb.set_trace()  
+#     # ipdb.set_trace()  
 #     outs = get_outlier()
 #     os.makedirs('_stats',exist_ok=True)
 #     with open(f'_stats/{args.prefix}_default_outlier.json', "w") as f:
 #         json.dump(outs, f, indent=2)
-#     unregister_hook_default(model)
+#     unregister_hook_default(model)        

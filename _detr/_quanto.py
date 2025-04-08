@@ -220,3 +220,52 @@ class _Calibration(TorchFunctionMode):
         This is useful in streamline mode to identify the module that generated a specific QTensor.
         """
         output.src_module = module
+
+
+def _requantize(
+    model: torch.nn.Module,
+    state_dict: Dict[str, Any],
+    quantization_map: Dict[str, Dict[str, str]],
+    device: torch.device = None,
+):
+    if device is None:
+        device = next(model.parameters()).device
+        if device.type == "meta":
+            device = torch.device("cpu")
+
+    # Quantize the model with parameters from the quantization map
+    for name, m in model.named_modules():
+        qconfig = quantization_map.get(name, None)
+        if qconfig is not None:
+            weights = qconfig["weights"]
+            if weights == "none":
+                weights = None
+            activations = qconfig["activations"]
+            if activations == "none":
+                activations = None
+            _quantize_submodule(model, name, m, weights=weights, activations=activations)
+
+    # Move model parameters and buffers to CPU before materializing quantized weights
+    for name, m in model.named_modules():
+
+        def move_tensor(t, device):
+            if t.device.type == "meta":
+                return torch.empty_like(t, device=device)
+            return t.to(device)
+
+        for name, param in m.named_parameters(recurse=False):
+            setattr(m, name, torch.nn.Parameter(move_tensor(param, "cpu")))
+        for name, param in m.named_buffers(recurse=False):
+            setattr(m, name, move_tensor(param, "cpu"))
+    for name, m in model.named_modules():
+        if not isinstance(m,QModuleMixin): continue
+        m.disable_output_quantization()
+        m._quantize_hooks.pop("output", None)
+        del m._buffers["output_scale"]
+        if isinstance(m, QConv2d): m._quantize_hooks["input"] = m.register_forward_pre_hook(_quantize_input)        
+        m._save_to_state_dict = types.MethodType(_save_to_state_dict, m)
+
+    # Move to target device
+    model.to(device)
+    # Load the quantized model weights
+    model.load_state_dict(state_dict, strict=False)
