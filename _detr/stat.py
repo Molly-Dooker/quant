@@ -1,8 +1,16 @@
 import ipdb;
 import json
 import sys
-
+import numpy as np
 eps = sys.float_info.epsilon
+
+
+
+_rmse = '_stats/RMSE.json'
+with open(_rmse, "r") as f:
+    rmse = json.load(f)
+for key in rmse.keys():
+    rmse[key] = np.mean(rmse[key]).item()
 
 
 _quantized_outlier = "_stats/quantized_outlier.json" 
@@ -18,13 +26,14 @@ with open(_default_outlier, "r") as f:
 for key in quantized.keys():
     quantized[key]['quantized_outlier_ratio']=quantized_outlier[key]['outlier_ratio'] 
     quantized[key]['default_outlier_ratio']=default_outlier[key]['outlier_ratio'] 
+    quantized[key]['rmse']=rmse[key]
     
 
 
-sorted_data = sorted(quantized.items(), key=lambda item: item[1]['quantized_outlier_ratio'], reverse=True)
+sorted_data = sorted(quantized.items(), key=lambda item: item[1]['rmse'], reverse=True)
 ipdb.set_trace()
 for key, stats in sorted_data:
-    print(f"{key:100}: quantized_outlier_ratio={stats['quantized_outlier_ratio']:.6f}, default_outlier_ratio={stats['default_outlier_ratio']:.6f}, std={stats['std']:.6f},")
+    print(f"{key:100}: rmse={stats['rmse']:.6f},    outlier_ratio={stats['quantized_outlier_ratio']:.6f}")
 
 # json_file_path = "_stats/stat_default.json" 
 # json_file_path2 = "_stats/stat4_quantized.json" 

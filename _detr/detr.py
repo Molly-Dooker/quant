@@ -3,20 +3,20 @@ import sys
 import argparse
 import math
 import itertools
-from transformers import DetrImageProcessor, DetrForObjectDetection
+import os
+import json
 from loguru import logger
-from transformers.utils.fx import symbolic_trace
+
 import torch
-from PIL import Image
-import requests
-import numpy as np
-import torch.nn as nn
-from PIL import ImageDraw, ImageFont
+from torchvision.datasets import CocoDetection
+from torch.utils.data import DataLoader
+from transformers import DetrImageProcessor, DetrForObjectDetection
 from datasets import load_dataset
 from tqdm import tqdm
-from ultralytics.utils.metrics import DetMetrics
-from _util import class_names, keyword_to_itype, update_stats, get_preds, transform, custom_collate_fn, fold_frozen_bn_to_identity
+
+from _util import fold_frozen_bn_to_identity, custom_transform, _collate_fn, keyword_to_itype
 from _quanto import _quantize, _Calibration, _requantize
+
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
     Calibration,
@@ -30,10 +30,9 @@ from optimum.quanto import (
     requantize,
     quantize_activation
 )
-from optimum.quanto.nn import QConv2d, QLinear, QModuleMixin
-import os
-import json
 
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
 
 
 def logger_enable(prefix=''):
@@ -47,33 +46,49 @@ def logger_enable(prefix=''):
     logger.add("_logs/log", rotation="500 MB", level="INFO", format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
-def eval(model, device, dataloader, processor, prefix=''):
-    stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
-    metrics = DetMetrics()
-    metrics.names = class_names
-    model.to(device)
-    model.eval()  
-    with torch.no_grad():
-        total_batch = len(dataloader)
-        for idx, batch in enumerate(tqdm(dataloader,desc='EVAL..')):
-            logger.bind(file_only=True).info(f'eval... {idx+1}/{total_batch}')
-            objects = objects = batch.pop('objects')
-            inputs = {
-                'pixel_values': batch.pop('pixel_values').to(device),
-                'pixel_mask': batch.pop('pixel_mask').to(device)}
-            outputs = model(**inputs)               
-            origin_shape = torch.stack([torch.tensor(shape_) for shape_ in batch['origin_shape']])
-            results = processor.post_process_object_detection(outputs, target_sizes=origin_shape, threshold=0.001)
-            preds = get_preds(results)
-            stats = update_stats(preds, objects, stats, device)
-    stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in stats.items()}
-    stats.pop("target_img", None)
-    if len(stats):
-        metrics.process(**stats)
-    result = metrics.results_dict
-    mAP50   = result['metrics/mAP50(B)'].item()
-    mAP5095 = result['metrics/mAP50-95(B)'].item()
-    logger.info(f'{prefix} mAP50:{mAP50 : .3f}, mAP50-95 : {mAP5095:.3f}')
+def eval(model, device, dataloader, processor, prefix=''):        
+        gt_path = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
+        cocoGt = COCO(gt_path)        
+        model.to(device)
+        model.eval()       
+        all_results = []
+        all_targets = []
+        with torch.no_grad():
+            for src,targets, Size in tqdm(dataloader,desc='eval...'):
+                src = src.to(device)
+                outputs = model(src)
+                results = processor.post_process_object_detection(outputs, target_sizes=Size, threshold=0.001)
+                all_results.extend(results)
+                all_targets.extend(targets)
+
+        coco_results = []
+        for idx, output in enumerate(all_results):
+            if len(all_targets[idx]) > 0 and 'image_id' in all_targets[idx][0]:
+                image_id = all_targets[idx][0]['image_id']
+            else:
+                continue
+
+            scores = output['scores'].detach().cpu().numpy()
+            labels = output['labels'].detach().cpu().numpy()
+            boxes  = output['boxes'].detach().cpu().numpy()  # [x1, y1, x2, y2]
+            for score, label, box in zip(scores, labels, boxes):
+                x1, y1, x2, y2 = box
+                bbox = [x1, y1, x2 - x1, y2 - y1]
+                result = {
+                    "image_id": image_id,
+                    "category_id": int(label),
+                    "bbox": [float(b) for b in bbox],
+                    "score": float(score)
+                }
+                coco_results.append(result)
+
+        cocoDt = cocoGt.loadRes(coco_results)
+        cocoEval = COCOeval(cocoGt, cocoDt, iouType='bbox')
+        cocoEval.evaluate()
+        cocoEval.accumulate()
+        cocoEval.summarize()
+        mAP5095 = cocoEval.stats[0].item(); mAP50 = cocoEval.stats[1].item(); 
+        logger.info(f'{prefix} mAP50:{mAP50 : .3f}, mAP50-95 : {mAP5095:.3f}')
 
 
 def calibrate(model, device, dataloader, num=10000):
@@ -83,47 +98,46 @@ def calibrate(model, device, dataloader, num=10000):
     with torch.no_grad():
         for idx, batch in enumerate(tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating...")):
             logger.bind(file_only=True).info(f'calibrate... {idx+1}/{iter}')
-            inputs = {
-                'pixel_values': batch.pop('pixel_values').to(device),
-                'pixel_mask': batch.pop('pixel_mask').to(device)}
-            _ = model(**inputs)               
+            _ = model(batch[0].to(device))               
 
 
 def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
     EVAL = args.eval
-    STAT = args.stat
     if not EVAL:
-
-        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+        model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
+        fold_frozen_bn_to_identity(model)
         if args.size==-1:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
         else:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
-        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
-        model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
-        fold_frozen_bn_to_identity(model)
+
+        img_dir = os.path.join(args.coco_dir,'images', 'val2017')
+        ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
+        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : custom_transform(img, target, processor))
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn, num_workers=args.num_workers)
         # base model evaluation
-        # eval(model,args.device,dataloader,processor,'default')
+        if args.default:
+            eval(model, args.device, dataloader, processor, 'default')
+
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = []
         if args.exclude is not None:
             exclude = [ x for x in args.exclude.replace(' ','').split(',') ]    
         logger.info(f'exclude : {exclude}')        
-        # exclude = ['class_labels_classifier',
-        #            'bbox_predictor.layers.0',
-        #            'bbox_predictor.layers.1',
-        #            'bbox_predictor.layers.2',
-        # ]
+        exclude = ['class_labels_classifier',
+                   'bbox_predictor.layers.0',
+                   'bbox_predictor.layers.1',
+                   'bbox_predictor.layers.2',
+        ]
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
         if activations is not None:
             logger.info('Calibrate start...')
             # with Calibration(): 
             with _Calibration(): # custom Calibration
-                calibrate(model, args.device, dataloader,10)
+                calibrate(model, args.device, dataloader)
         logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
@@ -157,11 +171,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="detr")
     parser.add_argument("--prefix", type=str, default="test1")
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
-    parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
-    parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
+    parser.add_argument("--coco_dir", type=str, default='/Data/Dataset/coco')
     parser.add_argument("--saveroot", type=str, default='./_model')
-    parser.add_argument("--split", type=str, default='val')
     parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
@@ -170,6 +183,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--stat', action='store_true', help='Enable stat mode')
     parser.add_argument('--no-stat', dest='stat', action='store_false', help='Disable stat mode')
+
+    parser.add_argument('--default', action='store_true', help='Enable stat mode')
+    parser.add_argument('--no-default', dest='default', action='store_false')
 
     parser.add_argument("--size", type=int, default=800)
     parser.add_argument('--exclude', type=str, required=False, help='')
