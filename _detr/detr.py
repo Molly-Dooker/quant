@@ -127,11 +127,6 @@ def main(args):
         if args.exclude is not None:
             exclude = [ x for x in args.exclude.replace(' ','').split(',') ]    
         logger.info(f'exclude : {exclude}')        
-        exclude = ['class_labels_classifier',
-                   'bbox_predictor.layers.0',
-                   'bbox_predictor.layers.1',
-                   'bbox_predictor.layers.2',
-        ]
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
         if activations is not None:
             logger.info('Calibrate start...')
@@ -188,7 +183,9 @@ if __name__ == '__main__':
     parser.add_argument('--no-default', dest='default', action='store_false')
 
     parser.add_argument("--size", type=int, default=800)
-    parser.add_argument('--exclude', type=str, required=False, help='')
+    parser.add_argument('--exclude', type=str, default='class_labels_classifier, bbox_predictor.layers.0, bbox_predictor.layers.1, bbox_predictor.layers.2')
+
+
     args = parser.parse_args()
     args.device = f'cuda:{args.device}'   
     
