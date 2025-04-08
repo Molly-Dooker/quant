@@ -118,8 +118,7 @@ def main(args):
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : custom_transform(img, target, processor))
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn, num_workers=args.num_workers)
         # base model evaluation
-        if args.default:
-            eval(model, args.device, dataloader, processor, 'default')
+        if args.default: eval(model, args.device, dataloader, processor, 'default')
 
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
@@ -130,7 +129,6 @@ def main(args):
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
         if activations is not None:
             logger.info('Calibrate start...')
-            # with Calibration(): 
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
         logger.info('frozen model')    
@@ -143,16 +141,17 @@ def main(args):
             json.dump(quantization_map(model), f)
         logger.info('end!')
     if EVAL:
-        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         if args.size==-1:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
         else:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
-        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
-
+        img_dir = os.path.join(args.coco_dir,'images', 'val2017')
+        ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
+        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : custom_transform(img, target, processor))
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn, num_workers=args.num_workers)
         model_reloaded = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model_reloaded)
+        
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}_map.json', 'r') as f:
             loaded_quantization_map = json.load(f)
