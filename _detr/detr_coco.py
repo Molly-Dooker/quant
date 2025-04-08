@@ -105,60 +105,6 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn)
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
-        
-
-        model2 = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
-        fold_frozen_bn_to_identity(model2)
-        state_dict = load_file(f'{args.saveroot}/default_quant.safetensors')
-        with open(f'{args.saveroot}/default_quant_map.json', 'r') as f:
-            loaded_quantization_map = json.load(f)        
-        _requantize(model2, state_dict, loaded_quantization_map)
-        freeze(model2)
-
-        RMSE = dict()
-        data= dict()
-        def prehook(module, inputs):
-            activation = inputs[0].detach().cpu()
-            data[module.name]={'input':activation}
-        def hook(module, inputs, outputs):            
-            data[module.name]['output']=outputs.detach().cpu()
-
-        model.to('cuda:6')
-        model.eval()  
-        for name, m in model.named_modules():
-            if isinstance(m,(nn.Conv2d, nn.Linear)):
-                m._hooks=dict()
-                m.name = name
-                m._hooks['prehook'] = m.register_forward_pre_hook(prehook)
-                m._hooks['hook']    = m.register_forward_hook(hook)
-        model2.to('cuda:7')
-        model2.eval()  
-        with torch.no_grad():
-            idx = 0
-            for batch in tqdm(dataloader, desc='calibrate'):
-                inputs = {
-                    'pixel_values': batch.pop('pixel_values').to('cuda:6'),
-                    'pixel_mask': batch.pop('pixel_mask').to('cuda:6')}
-                _ = model(**inputs)    
-                for name, m in model2.named_modules():
-                    if isinstance(m,(QConv2d, QLinear)):                        
-                        input = data[name]['input'].to('cuda:7')
-                        output = m(input)
-                        output_ = data[name]['output'].to('cuda:7')
-                        rmse = torch.sqrt(torch.mean((output-output_)**2)).detach().cpu().item()
-                        RMSE.setdefault(name, []).append(rmse)
-                if idx==20: break
-                idx+=1
-        ipdb.set_trace()
-
-
-
-        eval(model, args.device, dataloader, processor, 'quantized')
-
-        #  디폴트 의 conv2d linear 에 hook 과 prehook 을 넣어서 각 input 과 output 을 잡아서 모델 이름에 대해 dict에 넣음
-        # quant 모델을 순환하며 dict 의 keyname 과 같은 레이어에 input을 넣고 output을 가져와서 rms 함 
-
-
         # base model evaluation
         # eval(model,args.device,dataloader,processor,'default')
         weights = keyword_to_itype(args.weights)
@@ -201,7 +147,7 @@ def main(args):
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}_map.json', 'r') as f:
             loaded_quantization_map = json.load(f)
-        requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
+        _requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
         freeze(model_reloaded)
         logger.info("Serialized quantized model")
         eval(model_reloaded, args.device, dataloader, args.size, 'reloaded')
