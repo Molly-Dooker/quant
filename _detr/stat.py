@@ -6,12 +6,26 @@ import pandas as pd
 eps = sys.float_info.epsilon
 
 
-total = '_stats/total.json'
-with open(total, 'r', encoding='utf-8') as f:
-    data = json.load(f)
+_total = '_stats/total.json'
+with open(_total, 'r', encoding='utf-8') as f:
+    total = json.load(f)
+ipdb.set_trace()
+
+_mAP = '_stats/mAP.json'
+with open(_mAP, 'r', encoding='utf-8') as f:
+    mAP = json.load(f)
+
+for key in total.keys():
+    mAP50   = mAP[key]['mAP50']
+    mAP5095 = mAP[key]['mAP50-95']
+    total[key]['mAP50']= float(mAP50)
+    total[key]['mAP5095']= float(mAP5095)
+
+with open('_stats/total.json', 'w', encoding='utf-8') as json_file:
+    json.dump(total, json_file, ensure_ascii=False, indent=4)
 
 # JSON 데이터를 DataFrame으로 변환 (key는 index로, value는 딕셔너리)
-df = pd.DataFrame.from_dict(data, orient='index')
+df = pd.DataFrame.from_dict(total, orient='index')
 
 # index를 컬럼으로 변환하고, 컬럼명을 'key'로 지정
 df.reset_index(inplace=True)
