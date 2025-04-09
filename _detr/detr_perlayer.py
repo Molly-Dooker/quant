@@ -124,7 +124,6 @@ def main(args):
         exclude = ['class_labels_classifier', 'bbox_predictor.layers.0', 'bbox_predictor.layers.1', 'bbox_predictor.layers.2']
         if args.exclude is not None:
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
-            if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')        
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
         if activations is not None:
