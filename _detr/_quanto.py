@@ -13,6 +13,7 @@ from torch.overrides import TorchFunctionMode
 from optimum.quanto import absmax_scale, QTensor
 from optimum.quanto.calibrate import _updated_scale
 import types
+import re
 def _quantize_input(module: torch.nn.Module, input: torch.Tensor) -> torch.Tensor:
     input = input[0]
     if isinstance(input, ActivationQBytesTensor):
@@ -39,6 +40,19 @@ def _save_to_state_dict(self, destination, prefix, keep_vars):
         destination[prefix + "bias"] = self.bias if keep_vars else self.bias.detach()
     destination[prefix + "input_scale"] = self.input_scale if keep_vars else self.input_scale.detach()
     # destination[prefix + "output_scale"] = self.output_scale if keep_vars else self.output_scale.detach()
+
+
+
+def is_match(name, patterns):
+    for pattern in patterns:
+        if pattern.startswith('re:'):
+            regex = pattern[3:]
+            if re.match(regex, name): 
+                return True
+        else:
+            if pattern==name:
+                return True
+    return False
 
 def _quantize(
     model: torch.nn.Module,
@@ -84,6 +98,7 @@ def _quantize(
         if exclude is not None and any(fnmatch(name, pattern) for pattern in exclude):
             continue
         if isinstance(m,torch.nn.LayerNorm): continue
+        if is_match(name,exclude): continue
         _quantize_submodule(model, name, m, weights=weights, activations=activations, optimizer=optimizer)
 
     for name, m in model.named_modules():
