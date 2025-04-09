@@ -105,8 +105,7 @@ def main(args):
     logger.info('start!')
     EVAL = args.eval
     if not EVAL:
-        model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
-        fold_frozen_bn_to_identity(model)
+
         if args.size==-1:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
         else:
@@ -123,33 +122,45 @@ def main(args):
         state_dict = load_file(f'{args.saveroot}/default_quant.safetensors')
         with open(f'{args.saveroot}/default_quant.json', 'r') as f:
             qmap = json.load(f)
+        layernames = list(qmap.keys())
+
+        index = int(args.device[-1])
+        start = index*19
+        stop  = None if index == 7 else (index + 1) * 19
+        layernames_ =  layernames[start:stop]
+        logger.info(f'index:{index}, layers:{len(layernames_)}')
+        for i, layername in enumerate(layernames_):
+            logger.info(f'{i+1}/{len(layernames_)} start {layername}')
+            state_dict_ = {key: value for key, value in state_dict.items() if layernames_[0] in key}
+            qmap_ = {layername: qmap[layername]}
+            model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
+            fold_frozen_bn_to_identity(model)
+            _requantize(model, state_dict_, qmap_, args.device)
+            freeze(model)
+            eval(model, args.device, dataloader, processor, layername)
 
 
-        for layername in qmap.keys():
-            filtered_state_dict = {key: value for key, value in state_dict.items() if layername in key}
-            ipdb.set_trace()
 
-
-        weights = keyword_to_itype(args.weights)
-        activations = keyword_to_itype(args.activations)
-        exclude = ['class_labels_classifier', 'bbox_predictor.layers.0', 'bbox_predictor.layers.1', 'bbox_predictor.layers.2']
-        if args.exclude is not None:
-            exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
-        logger.info(f'exclude : {exclude}')        
-        _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
-        if activations is not None:
-            logger.info('Calibrate start...')
-            with _Calibration(): # custom Calibration
-                calibrate(model, args.device, dataloader)
-        logger.info('frozen model')    
-        freeze(model)
-        eval(model, args.device, dataloader, processor, 'quantized')
-        os.makedirs(args.saveroot,exist_ok=True)
-        save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
-        # qmap 저장하기
-        with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
-            json.dump(quantization_map(model), f)
-        logger.info('end!')
+        # weights = keyword_to_itype(args.weights)
+        # activations = keyword_to_itype(args.activations)
+        # exclude = ['class_labels_classifier', 'bbox_predictor.layers.0', 'bbox_predictor.layers.1', 'bbox_predictor.layers.2']
+        # if args.exclude is not None:
+        #     exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
+        # logger.info(f'exclude : {exclude}')        
+        # _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize       
+        # if activations is not None:
+        #     logger.info('Calibrate start...')
+        #     with _Calibration(): # custom Calibration
+        #         calibrate(model, args.device, dataloader)
+        # logger.info('frozen model')    
+        # freeze(model)
+        # eval(model, args.device, dataloader, processor, 'quantized')
+        # os.makedirs(args.saveroot,exist_ok=True)
+        # save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
+        # # qmap 저장하기
+        # with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
+        #     json.dump(quantization_map(model), f)
+        # logger.info('end!')
     if EVAL:
         if args.size==-1:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
