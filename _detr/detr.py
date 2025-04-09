@@ -6,6 +6,7 @@ import itertools
 import os
 import json
 from loguru import logger
+import re
 
 import torch
 from torchvision.datasets import CocoDetection
@@ -102,7 +103,7 @@ def calibrate(model, device, dataloader, num=10000):
 
 def main(args):
     logger_enable(args.prefix)
-    logger.info('start!')
+    # logger.info('start!')
     EVAL = args.eval
     if not EVAL:
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
@@ -128,10 +129,10 @@ def main(args):
         logger.info(f'exclude : {exclude}')        
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
         if activations is not None:
-            logger.info('Calibrate start...')
+            # logger.info('Calibrate start...')
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
-        logger.info('frozen model')    
+        # logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
         os.makedirs(args.saveroot,exist_ok=True)
@@ -139,7 +140,7 @@ def main(args):
         # qmap 저장하기
         with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
             json.dump(quantization_map(model), f)
-        logger.info('end!')
+        # logger.info('end!')
     if EVAL:
         if args.size==-1:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
