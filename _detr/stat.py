@@ -2,31 +2,50 @@ import ipdb;
 import json
 import sys
 import numpy as np
+import pandas as pd 
 eps = sys.float_info.epsilon
 
 
+total = '_stats/total.json'
+with open(total, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+# JSON 데이터를 DataFrame으로 변환 (key는 index로, value는 딕셔너리)
+df = pd.DataFrame.from_dict(data, orient='index')
+
+# index를 컬럼으로 변환하고, 컬럼명을 'key'로 지정
+df.reset_index(inplace=True)
+df.rename(columns={'index': 'key'}, inplace=True)
+
+# DataFrame 확인 (선택사항)
+print(df.head())
+
+# CSV 파일로 저장 (index 제외)
+df.to_csv('_stats/total.csv', encoding='utf-8')
 
 _rmse = '_stats/RMSE.json'
 with open(_rmse, "r") as f:
     rmse = json.load(f)
-for key in rmse.keys():
-    rmse[key] = np.mean(rmse[key]).item()
-
-
 _quantized_outlier = "_stats/quantized_outlier.json" 
-_quantized = "_stats/quantized.json" 
-_default_outlier   = "_stats/default_outlier.json" 
 with open(_quantized_outlier, "r") as f:
     quantized_outlier = json.load(f)
+_quantized = "_stats/quantized.json"
 with open(_quantized, "r") as f:
     quantized = json.load(f)
-with open(_default_outlier, "r") as f:
-    default_outlier = json.load(f)
 
-for key in quantized.keys():
-    quantized[key]['quantized_outlier_ratio']=quantized_outlier[key]['outlier_ratio'] 
-    quantized[key]['default_outlier_ratio']=default_outlier[key]['outlier_ratio'] 
-    quantized[key]['rmse']=rmse[key]
+
+for key in rmse.keys():
+    rmse_    = rmse[key]
+    outlier_ = quantized_outlier[key]['outlier_ratio'] 
+    std_     = quantized[key]['std']
+    rmse[key]= {
+        'rmse':rmse_,
+        'outlier':outlier_,
+        'std':std_
+    }
+with open('_stats/total.json', 'w', encoding='utf-8') as json_file:
+    json.dump(rmse, json_file, ensure_ascii=False, indent=4)
+
     
 
 
