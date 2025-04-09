@@ -119,6 +119,17 @@ def main(args):
         # base model evaluation
         if args.default: eval(model, args.device, dataloader, processor, 'default')
 
+        
+        state_dict = load_file(f'{args.saveroot}/default_quant.safetensors')
+        with open(f'{args.saveroot}/default_quant.json', 'r') as f:
+            qmap = json.load(f)
+
+
+        for layername in qmap.keys():
+            filtered_state_dict = {key: value for key, value in state_dict.items() if layername in key}
+            ipdb.set_trace()
+
+
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = ['class_labels_classifier', 'bbox_predictor.layers.0', 'bbox_predictor.layers.1', 'bbox_predictor.layers.2']
@@ -136,7 +147,7 @@ def main(args):
         os.makedirs(args.saveroot,exist_ok=True)
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         # qmap 저장하기
-        with open(f'{args.saveroot}/{args.prefix}_map.json', 'w') as f:
+        with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
             json.dump(quantization_map(model), f)
         logger.info('end!')
     if EVAL:
@@ -152,7 +163,7 @@ def main(args):
         fold_frozen_bn_to_identity(model_reloaded)
 
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
-        with open(f'{args.saveroot}/{args.prefix}_map.json', 'r') as f:
+        with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
             loaded_quantization_map = json.load(f)
         _requantize(model_reloaded, state_dict, loaded_quantization_map, args.device)
         freeze(model_reloaded)
