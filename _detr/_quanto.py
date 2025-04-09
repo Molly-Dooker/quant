@@ -92,11 +92,13 @@ def _quantize(
         include = [include] if isinstance(include, str) else include
     if exclude is not None:
         exclude = [exclude] if isinstance(exclude, str) else exclude
+
     for name, m in model.named_modules():
-        if include is not None and not any(fnmatch(name, pattern) for pattern in include):
+        if include is not None:
+            if is_match(name,include):
+                _quantize_submodule(model, name, m, weights=weights, activations=activations, optimizer=optimizer)
             continue
-        if exclude is not None and any(fnmatch(name, pattern) for pattern in exclude):
-            continue
+
         if isinstance(m,torch.nn.LayerNorm): continue
         if is_match(name,exclude): continue
         _quantize_submodule(model, name, m, weights=weights, activations=activations, optimizer=optimizer)

@@ -105,8 +105,6 @@ def main(args):
     logger.info('start!')
     EVAL = args.eval
     if not EVAL:
-        model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
-        fold_frozen_bn_to_identity(model)
         if args.size==-1:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
         else:
@@ -119,28 +117,53 @@ def main(args):
         # base model evaluation
         if args.default: eval(model, args.device, dataloader, processor, 'default')
 
+
+        modules = [
+            "model.input_projection",
+            "model.backbone.conv_encoder.model.encoder.stages.0",
+            "model.backbone.conv_encoder.model.encoder.stages.1",
+            "model.backbone.conv_encoder.model.encoder.stages.2",
+            "model.backbone.conv_encoder.model.encoder.stages.3",
+            "model.encoder.layers.0",
+            "model.encoder.layers.1",
+            "model.encoder.layers.2",
+            "model.encoder.layers.3",
+            "model.encoder.layers.4",
+            "model.encoder.layers.5",
+            "model.decoder.layers.0",
+            "model.decoder.layers.1",
+            "model.decoder.layers.2",
+            "model.decoder.layers.3",
+            "model.decoder.layers.4",
+            "model.decoder.layers.5",
+            "bbox_predictor",
+            "class_labels_classifier"
+        ]
+        index = int(args.device[-1])
+        start = index*2
+        stop  = None if index == 7 else (index + 1) * 2
+        modules_=[f're:^{m}.*' for m in modules[start:stop]]
+        logger.info(f'target modules : {modules_}')
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
-        exclude = ['class_labels_classifier', 're:^bbox_predictor.*']
-        if args.exclude is not None:
-            exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
-            if args.exclude=='': exclude = []
-        logger.info(f'exclude : {exclude}')        
-        _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize   
-        ipdb.set_trace()    
-        if activations is not None:
-            logger.info('Calibrate start...')
-            with _Calibration(): # custom Calibration
-                calibrate(model, args.device, dataloader)
-        logger.info('frozen model')    
-        freeze(model)
-        eval(model, args.device, dataloader, processor, 'quantized')
-        os.makedirs(args.saveroot,exist_ok=True)
-        save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
-        # qmap 저장하기
-        with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
-            json.dump(quantization_map(model), f)
-        logger.info('end!')
+        for i,m in enumerate(modules_):
+            model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
+            fold_frozen_bn_to_identity(model)
+            logger.info(f'{i+1}/{len(modules_)} start {m}')
+            _quantize(model, weights=weights, activations=activations, include=m) # custom quantize   
+            if activations is not None:
+                logger.info('Calibrate start...')
+                with _Calibration(): # custom Calibration
+                    calibrate(model, args.device, dataloader)
+            logger.info('frozen model')    
+            freeze(model)
+            eval(model, args.device, dataloader, processor, m)
+        # os.makedirs(args.saveroot,exist_ok=True)
+        # save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
+        # # qmap 저장하기
+        # with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
+        #     json.dump(quantization_map(model), f)
+        # logger.info('end!')
     if EVAL:
         if args.size==-1:
             processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm")
