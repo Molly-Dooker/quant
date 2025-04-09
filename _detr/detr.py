@@ -126,8 +126,7 @@ def main(args):
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')        
-        _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize   
-        ipdb.set_trace()    
+        _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
         if activations is not None:
             logger.info('Calibrate start...')
             with _Calibration(): # custom Calibration
