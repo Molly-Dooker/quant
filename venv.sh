@@ -16,4 +16,5 @@ pip install pycocotools==2.0.8
 pip install wandb==0.19.9
 pip install torchmetrics==1.7.1
 pip install timm==1.0.15
+pip install jupyter==1.1.1
 # aimet-torch 2.1.0+cu121
