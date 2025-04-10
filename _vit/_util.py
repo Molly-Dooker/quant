@@ -1,7 +1,22 @@
 import traceback, ipdb
 import sys
+from optimum.quanto import (
+    qfloat8,
+    qint4,
+    qint8,
+)
 
-_ROOTDIR = '_model/'
+
+def transform(data_batch, processor):
+    IMAGE = data_batch["image"]
+    IMAGE = [image.convert('RGB') for image in IMAGE]
+    inputs = processor(IMAGE, return_tensors="pt")
+    inputs["labels"] = data_batch["label"]
+    return inputs
+
+def keyword_to_itype(k):
+    return {"none": None, "int4": qint4, "int8": qint8, "float8": qfloat8}[k]
+
 def ipdb_sys_excepthook():
     """
     When called this function will set up the system exception hook.

@@ -47,7 +47,7 @@ def logger_enable(prefix=''):
     logger.add("_logs/log", rotation="500 MB", level="INFO", format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
-def eval(model, device, dataloader, processor, prefix=''):        
+def eval(model, device, dataloader, processor, prefix=''):
         gt_path = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         cocoGt = COCO(gt_path)        
         model.to(device)
