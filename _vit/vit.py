@@ -94,12 +94,10 @@ def main(args):
         logger.info(f'exclude : {exclude}')   
         # prepare model to quantize
         _quantize(model, weights=weights, activations=activations, exclude=exclude)
-        ipdb.set_trace()
         # print(model)  
         if activations is not None:
             with _Calibration():
                 calibrate(model, args.device, dataloader)
-        ipdb.set_trace()
         print("frozen model")
         freeze(model)
         eval(model, args.device, dataloader,'quantized')
@@ -107,28 +105,20 @@ def main(args):
         with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
             json.dump(quantization_map(model), f)
 
-
     if EVAL:
         processor = ViTImageProcessor.from_pretrained(args.model_name)
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True)
-
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
             qmap = json.load(f)
         config = ViTConfig.from_pretrained(args.model_name)
         with init_empty_weights():
-            model_reloaded = ViTForImageClassification.from_pretrained(args.model_name, config=config)
-        _requantize(model_reloaded, state_dict, qmap, args.device)
-        freeze(model_reloaded)
-        print("Serialized quantized model")
-        # ipdb.set_trace()
-        eval(model_reloaded, args.device, dataloader,'reloaded')
-
-
-
-
+            model = ViTForImageClassification.from_pretrained(args.model_name, config=config)
+        _requantize(model, state_dict, qmap, args.device)
+        freeze(model)
+        eval(model, args.device, dataloader,'reloaded')
 
 if __name__ == "__main__":
 
