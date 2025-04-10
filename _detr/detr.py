@@ -6,18 +6,14 @@ import itertools
 import os
 import json
 from loguru import logger
-import re
 
 import torch
 from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
 from transformers import DetrImageProcessor, DetrForObjectDetection
-from datasets import load_dataset
 from tqdm import tqdm
-
 from _util import fold_frozen_bn_to_identity, custom_transform, _collate_fn, keyword_to_itype
 from _quanto import _quantize, _Calibration, _requantize
-
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
     Calibration,
@@ -31,10 +27,8 @@ from optimum.quanto import (
     requantize,
     quantize_activation
 )
-
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-
 
 def logger_enable(prefix=''):
     def console_filter(record):

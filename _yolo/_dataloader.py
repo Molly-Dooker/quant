@@ -1,10 +1,6 @@
 from ultralytics.data.augment import LetterBox
 import numpy as np
-from datasets import load_dataset
-from PIL import Image
 import torch
-import ipdb;
-from tqdm import tqdm
 
 
 class Processor:
@@ -22,7 +18,6 @@ class Processor:
         im = torch.from_numpy(im)
         im = im.float()
         im /= 255
-        # np.save(file=root+f'im2',arr=im.clone().detach().cpu().numpy())
         return im
     def pre_transform(self,im):
         result = [self.letterbox(image=x) for x in im]
