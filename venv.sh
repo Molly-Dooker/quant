@@ -12,4 +12,5 @@ pip install albumentations==2.0.5
 pip install loguru==0.7.3
 pip install tabulate==0.9.0
 pip install ipdb==0.13.13
+pip install pycocotools==2.0.8
 # aimet-torch 2.1.0+cu121
