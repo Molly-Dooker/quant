@@ -6,6 +6,7 @@ from tqdm import tqdm
 import albumentations as A
 from transformers import AutoImageProcessor
 import ipdb
+import cv2
 id2label = {
     0: "shirt, blouse",
     1: "top, t-shirt, sweatshirt",
@@ -70,10 +71,10 @@ def filter_invalid_bboxes(example):
             valid_bbox_ids.append(example["objects"]["bbox_id"][i])
             valid_categories.append(example["objects"]["category"][i])
             valid_areas.append(example["objects"]["area"][i])
-        else:
-            print(
-                f"Image with invalid bbox: {example['image_id']} Invalid bbox detected and discarded: {bbox} - bbox_id: {example['objects']['bbox_id'][i]} - category: {example['objects']['category'][i]}"
-            )
+        # else:
+        #     print(
+        #         f"Image with invalid bbox: {example['image_id']} Invalid bbox detected and discarded: {bbox} - bbox_id: {example['objects']['bbox_id'][i]} - category: {example['objects']['category'][i]}"
+        #     )
     example["objects"]["bbox"] = valid_bboxes
     example["objects"]["bbox_id"] = valid_bbox_ids
     example["objects"]["category"] = valid_categories
@@ -119,13 +120,13 @@ def transform_aug_ann(batch, transform, image_processor):
         {"image_id": id_, "annotations": formatted_anns(id_, cat_, ar_, box_)}
         for id_, cat_, ar_, box_ in zip(image_ids, categories, area, bboxes)
     ]
-
+    ipdb.set_trace()
     return image_processor(images=images, annotations=targets, return_tensors="pt")
 
 train_transform = A.Compose(
     transforms=[
         A.LongestMaxSize(500),
-        A.PadIfNeeded(500, 500, border_mode=0, value=(0, 0, 0)),
+        A.PadIfNeeded(min_height=500, min_width=500),
         A.HorizontalFlip(p=0.5),
         A.RandomBrightnessContrast(p=0.5),
         A.HueSaturationValue(p=0.5),
@@ -140,7 +141,7 @@ train_transform = A.Compose(
 val_transform = A.Compose(
     transforms=[
         A.LongestMaxSize(500),
-        A.PadIfNeeded(500, 500, border_mode=0, value=(0, 0, 0)),
+        A.PadIfNeeded(min_height=500, min_width=500),
     ],
     bbox_params=A.BboxParams(format="pascal_voc", label_fields=["category"]),
 )
@@ -150,16 +151,19 @@ val_transform = A.Compose(
 if __name__ =='__main__':
 
     dataset = load_dataset(path="detection-datasets/fashionpedia",cache_dir='/Data/Dataset/fashionpedia')
-    train_dataset = dataset["train"]
-    test_dataset = dataset["val"]
+    train = dataset["train"]
+    valid = dataset["val"]
 
-    train_dataset = train_dataset.map(filter_invalid_bboxes)
-    test_dataset = test_dataset.map(filter_invalid_bboxes)
+    train = train.map(filter_invalid_bboxes)
+    valid = valid.map(filter_invalid_bboxes)
 
     checkpoint = "facebook/detr-resnet-50-dc5"
     image_processor = AutoImageProcessor.from_pretrained(checkpoint)
 
-    train_dataset_transformed = train_dataset.with_transform(lambda batch : transform_aug_ann(batch, train_transform, image_processor))
-    test_dataset_transformed  =  test_dataset.with_transform(lambda batch : transform_aug_ann(batch, val_transform,   image_processor))
+    train_t  = train.with_transform(lambda batch : transform_aug_ann(batch, train_transform, image_processor))
+    valid_t =  valid.with_transform(lambda batch : transform_aug_ann(batch, val_transform,   image_processor))
 
-    ipdb.set_trace()
+    # ipdb.set_trace()
+    for X in valid_t:
+        print(1)
+        ipdb.set_trace()
