@@ -120,7 +120,6 @@ def transform_aug_ann(batch, transform, image_processor):
         {"image_id": id_, "annotations": formatted_anns(id_, cat_, ar_, box_)}
         for id_, cat_, ar_, box_ in zip(image_ids, categories, area, bboxes)
     ]
-    ipdb.set_trace()
     return image_processor(images=images, annotations=targets, return_tensors="pt")
 
 train_transform = A.Compose(
@@ -162,8 +161,3 @@ if __name__ =='__main__':
 
     train_t  = train.with_transform(lambda batch : transform_aug_ann(batch, train_transform, image_processor))
     valid_t =  valid.with_transform(lambda batch : transform_aug_ann(batch, val_transform,   image_processor))
-
-    # ipdb.set_trace()
-    for X in valid_t:
-        print(1)
-        ipdb.set_trace()
