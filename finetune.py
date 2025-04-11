@@ -260,12 +260,13 @@ if __name__ =='__main__':
 
     train = train.map(filter_invalid_bboxes)
     valid = valid.map(filter_invalid_bboxes)
-
     checkpoint = "facebook/detr-resnet-50-dc5"
     image_processor = AutoImageProcessor.from_pretrained(checkpoint)
-
     train_t  = train.with_transform(lambda batch : transform_aug_ann(batch, train_transform, image_processor))
     valid_t =  valid.with_transform(lambda batch : transform_aug_ann(batch, val_transform,   image_processor))
+
+
+    
 
 
     model = AutoModelForObjectDetection.from_pretrained(
@@ -313,11 +314,6 @@ if __name__ =='__main__':
         eval_dataset=valid_t,
         compute_metrics=compute_metrics,
     )
-
-    ipdb.set_trace()
-
-
-    trainer.train()
 
 
 
