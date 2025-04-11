@@ -1,6 +1,6 @@
 # python 3.10.12
 pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-pip install transformers==4.51.1
+pip install transformers==4.51.2
 pip install accelerate==1.6.0
 pip install optimum==1.24.0
 pip install optimum-quanto==0.2.7
