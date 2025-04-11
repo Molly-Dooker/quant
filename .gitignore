@@ -6,3 +6,4 @@ _model_backup
 runs
 _test
 _stats
+wandb

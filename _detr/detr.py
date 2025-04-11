@@ -116,7 +116,7 @@ def main(args):
 
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
-        exclude = ['class_labels_classifier', 're:^bbox_predictor.*']
+        exclude = ['class_labels_classifier', 're:^bbox_predictor.*', 're:^model.backbone.conv_encoder.model.encoder.stages.0.layers.0.*', 're:^model.encoder.layers.2.self_attn.*', 're:^model.encoder.layers.5.self_attn.*']
         if args.exclude is not None:
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
