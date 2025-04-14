@@ -128,7 +128,7 @@ class WindowAttention(nn.Module):
         relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
         relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
         self.register_buffer("relative_position_index", relative_position_index)
-
+        self.register_buffer("threshold", torch.tensor(1. / 0.01))
         self.qkv = nn.Linear(dim, dim * 3, bias=False)
         if qkv_bias:
             self.q_bias = nn.Parameter(torch.zeros(dim))
@@ -157,7 +157,8 @@ class WindowAttention(nn.Module):
 
         # cosine attention
         attn = (F.normalize(q, dim=-1) @ F.normalize(k, dim=-1).transpose(-2, -1))
-        logit_scale = torch.clamp(self.logit_scale, max=torch.log(torch.tensor(1. / 0.01))).exp()
+        logit_scale = torch.clamp(self.logit_scale, max=torch.log(self.threshold)).exp()
+        # logit_scale = torch.clamp(self.logit_scale, max=torch.log(torch.tensor(1. / 0.01))).exp()
         attn = attn * logit_scale
 
         relative_position_bias_table = self.cpb_mlp(self.relative_coords_table).view(-1, self.num_heads)
@@ -186,18 +187,18 @@ class WindowAttention(nn.Module):
         return f'dim={self.dim}, window_size={self.window_size}, ' \
                f'pretrained_window_size={self.pretrained_window_size}, num_heads={self.num_heads}'
 
-    def flops(self, N):
-        # calculate flops for 1 window with token length of N
-        flops = 0
-        # qkv = self.qkv(x)
-        flops += N * self.dim * 3 * self.dim
-        # attn = (q @ k.transpose(-2, -1))
-        flops += self.num_heads * N * (self.dim // self.num_heads) * N
-        #  x = (attn @ v)
-        flops += self.num_heads * N * N * (self.dim // self.num_heads)
-        # x = self.proj(x)
-        flops += N * self.dim * self.dim
-        return flops
+    # def flops(self, N):
+    #     # calculate flops for 1 window with token length of N
+    #     flops = 0
+    #     # qkv = self.qkv(x)
+    #     flops += N * self.dim * 3 * self.dim
+    #     # attn = (q @ k.transpose(-2, -1))
+    #     flops += self.num_heads * N * (self.dim // self.num_heads) * N
+    #     #  x = (attn @ v)
+    #     flops += self.num_heads * N * N * (self.dim // self.num_heads)
+    #     # x = self.proj(x)
+    #     flops += N * self.dim * self.dim
+    #     return flops
 
 
 class SwinTransformerBlock(nn.Module):
@@ -234,7 +235,6 @@ class SwinTransformerBlock(nn.Module):
             self.shift_size = 0
             self.window_size = min(self.input_resolution)
         assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
-
         self.norm1 = norm_layer(dim)
         self.attn = WindowAttention(
             dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
@@ -313,19 +313,19 @@ class SwinTransformerBlock(nn.Module):
         return f"dim={self.dim}, input_resolution={self.input_resolution}, num_heads={self.num_heads}, " \
                f"window_size={self.window_size}, shift_size={self.shift_size}, mlp_ratio={self.mlp_ratio}"
 
-    def flops(self):
-        flops = 0
-        H, W = self.input_resolution
-        # norm1
-        flops += self.dim * H * W
-        # W-MSA/SW-MSA
-        nW = H * W / self.window_size / self.window_size
-        flops += nW * self.attn.flops(self.window_size * self.window_size)
-        # mlp
-        flops += 2 * H * W * self.dim * self.dim * self.mlp_ratio
-        # norm2
-        flops += self.dim * H * W
-        return flops
+    # def flops(self):
+    #     flops = 0
+    #     H, W = self.input_resolution
+    #     # norm1
+    #     flops += self.dim * H * W
+    #     # W-MSA/SW-MSA
+    #     nW = H * W / self.window_size / self.window_size
+    #     flops += nW * self.attn.flops(self.window_size * self.window_size)
+    #     # mlp
+    #     flops += 2 * H * W * self.dim * self.dim * self.mlp_ratio
+    #     # norm2
+    #     flops += self.dim * H * W
+    #     return flops
 
 
 class PatchMerging(nn.Module):
@@ -370,11 +370,11 @@ class PatchMerging(nn.Module):
     def extra_repr(self) -> str:
         return f"input_resolution={self.input_resolution}, dim={self.dim}"
 
-    def flops(self):
-        H, W = self.input_resolution
-        flops = (H // 2) * (W // 2) * 4 * self.dim * 2 * self.dim
-        flops += H * W * self.dim // 2
-        return flops
+    # def flops(self):
+    #     H, W = self.input_resolution
+    #     flops = (H // 2) * (W // 2) * 4 * self.dim * 2 * self.dim
+    #     flops += H * W * self.dim // 2
+    #     return flops
 
 
 class BasicLayer(nn.Module):
@@ -440,13 +440,13 @@ class BasicLayer(nn.Module):
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
 
-    def flops(self):
-        flops = 0
-        for blk in self.blocks:
-            flops += blk.flops()
-        if self.downsample is not None:
-            flops += self.downsample.flops()
-        return flops
+    # def flops(self):
+    #     flops = 0
+    #     for blk in self.blocks:
+    #         flops += blk.flops()
+    #     if self.downsample is not None:
+    #         flops += self.downsample.flops()
+    #     return flops
 
     def _init_respostnorm(self):
         for blk in self.blocks:
@@ -496,12 +496,12 @@ class PatchEmbed(nn.Module):
             x = self.norm(x)
         return x
 
-    def flops(self):
-        Ho, Wo = self.patches_resolution
-        flops = Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
-        if self.norm is not None:
-            flops += Ho * Wo * self.embed_dim
-        return flops
+    # def flops(self):
+    #     Ho, Wo = self.patches_resolution
+    #     flops = Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
+    #     if self.norm is not None:
+    #         flops += Ho * Wo * self.embed_dim
+    #     return flops
 
 
 class SwinTransformerV2(nn.Module):
@@ -531,8 +531,8 @@ class SwinTransformerV2(nn.Module):
     """
 
     def __init__(self, img_size=256, patch_size=4, in_chans=3, num_classes=1000,
-                 embed_dim=8, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
-                 window_size=7, mlp_ratio=4., qkv_bias=True,
+                 embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
+                 window_size=8, mlp_ratio=4., qkv_bias=True,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                  use_checkpoint=False, pretrained_window_sizes=[0, 0, 0, 0], **kwargs):
@@ -550,14 +550,14 @@ class SwinTransformerV2(nn.Module):
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
-        num_patches = self.patch_embed.num_patches
+        # num_patches = self.patch_embed.num_patches
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 
         # absolute position embedding
-        if self.ape:
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
-            trunc_normal_(self.absolute_pos_embed, std=.02)
+        # if self.ape:
+        #     self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
+        #     trunc_normal_(self.absolute_pos_embed, std=.02)
 
         self.pos_drop = nn.Dropout(p=drop_rate)
 
@@ -600,13 +600,13 @@ class SwinTransformerV2(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {'absolute_pos_embed'}
+    # @torch.jit.ignore
+    # def c(self):
+    #     return {'absolute_pos_embed'}
 
-    @torch.jit.ignore
-    def no_weight_decay_keywords(self):
-        return {"cpb_mlp", "logit_scale", 'relative_position_bias_table'}
+    # @torch.jit.ignore
+    # def no_weight_decay_keywords(self):
+    #     return {"cpb_mlp", "logit_scale", 'relative_position_bias_table'}
 
     def forward_features(self, x):
         x = self.patch_embed(x)
@@ -627,11 +627,11 @@ class SwinTransformerV2(nn.Module):
         x = self.head(x)
         return x
 
-    def flops(self):
-        flops = 0
-        flops += self.patch_embed.flops()
-        for i, layer in enumerate(self.layers):
-            flops += layer.flops()
-        flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
-        flops += self.num_features * self.num_classes
-        return flops
+    # def flops(self):
+    #     flops = 0
+    #     flops += self.patch_embed.flops()
+    #     for i, layer in enumerate(self.layers):
+    #         flops += layer.flops()
+    #     flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
+    #     flops += self.num_features * self.num_classes
+    #     return flops

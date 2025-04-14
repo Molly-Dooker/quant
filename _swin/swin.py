@@ -7,7 +7,7 @@ import ipdb
 from loguru import logger
 from tqdm import tqdm
 from _util import ipdb_sys_excepthook, keyword_to_itype, transform
-
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 import torch
 import evaluate
 from accelerate import init_empty_weights
@@ -28,6 +28,7 @@ from optimum.quanto import (
 )
 from _quanto import _quantize, _requantize, _Calibration
 from _model import SwinTransformerV2
+from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 def logger_enable(prefix=''):
     def console_filter(record):
         # extra에 file_only가 True인 경우 콘솔 출력 제외
@@ -50,7 +51,7 @@ def eval(model, device, test_loader, prefix=''):
         for batch in tqdm(test_loader,desc='eval...'):
             data, target = batch["pixel_values"], batch["labels"]
             data= data.to(device)
-            output = model(data).logits
+            output = model(data)
             if isinstance(output, QTensor):
                 output = output.dequantize()
             output = output.argmax(-1).cpu()
@@ -73,16 +74,18 @@ def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
     if not EVAL : 
-        processor = ViTImageProcessor.from_pretrained(args.model_name)
-        model = ViTForImageClassification.from_pretrained(args.model_name)
-
+        # model_base = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
+        # model_small = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-small-patch4-window8-256")
+        # model_tiny = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256")   
+        model = SwinTransformerV2() 
+        processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
         # print("Model before quantization...")
         if args.default: eval(model, args.device, dataloader, 'default')
-
+        ipdb.set_trace()
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         # make exclude list
@@ -106,7 +109,7 @@ def main(args):
             json.dump(quantization_map(model), f)
 
     if EVAL:
-        processor = ViTImageProcessor.from_pretrained(args.model_name)
+        processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
@@ -124,7 +127,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="swin")
     parser.add_argument("--prefix", type=str, default="swin")
-    # parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
+    parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
     parser.add_argument("--dataset_name", type=str, default="Tsomaros/Imagenet-1k_validation")
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/ImageNet')
     parser.add_argument("--saveroot", type=str, default='./_model')
