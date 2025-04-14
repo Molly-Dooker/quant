@@ -75,16 +75,15 @@ def main(args):
     EVAL = args.eval
     if not EVAL :
         model = SwinTransformerV2(img_size=256, window_size=8)           
-        state_dict = torch.load('_model/model.pth')   
-        ipdb.set_trace()     
-        model.load_state_dict(state_dict, strict=False)
-        
+        state_dict = torch.load('_model/model.pth')
+        model.load_state_dict(state_dict, strict=False)        
         processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
         # print("Model before quantization...")
         if args.default: eval(model, args.device, dataloader, 'default')
+        ipdb.set_trace()
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         # make exclude list
@@ -98,7 +97,7 @@ def main(args):
         # print(model)  
         if activations is not None:
             with _Calibration():
-                calibrate(model, args.device, dataloader,1000)
+                calibrate(model, args.device, dataloader)
         print("frozen model")
         freeze(model)
         eval(model, args.device, dataloader,'quantized')

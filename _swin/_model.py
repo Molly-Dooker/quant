@@ -5,15 +5,11 @@
 # Written by Ze Liu
 # --------------------------------------------------------
 
-# https://github.com/microsoft/Swin-Transformer/blob/main/models/swin_transformer_v2.py
-# default setting
-# img_size    : 224->256
-# window_size : 7->8
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from timm.layers import DropPath, to_2tuple, trunc_normal_
 import numpy as np
 
 
@@ -67,22 +63,23 @@ def window_reverse(windows, window_size, H, W):
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
     return x
 
-
 class WindowAttention(nn.Module):
     r""" Window based multi-head self attention (W-MSA) module with relative position bias.
-    It supports both shifted and non-shifted windows.
+    It supports both of shifted and non-shifted window.
 
     Args:
         dim (int): Number of input channels.
         window_size (tuple[int]): The height and width of the window.
         num_heads (int): Number of attention heads.
-        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True.
-        attn_drop (float, optional): Dropout ratio of attention weight. Default: 0.0.
-        proj_drop (float, optional): Dropout ratio of output. Default: 0.0.
+        qkv_bias (bool, optional):  If True, add a learnable bias to query, key, value. Default: True
+        attn_drop (float, optional): Dropout ratio of attention weight. Default: 0.0
+        proj_drop (float, optional): Dropout ratio of output. Default: 0.0
         pretrained_window_size (tuple[int]): The height and width of the window in pre-training.
     """
+
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, attn_drop=0., proj_drop=0.,
                  pretrained_window_size=[0, 0]):
+
         super().__init__()
         self.dim = dim
         self.window_size = window_size  # Wh, Ww
@@ -91,20 +88,17 @@ class WindowAttention(nn.Module):
 
         self.logit_scale = nn.Parameter(torch.log(10 * torch.ones((num_heads, 1, 1))), requires_grad=True)
 
-        # MLP to generate continuous relative position bias
-        self.cpb_mlp = nn.Sequential(
-            nn.Linear(2, 512, bias=True),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, num_heads, bias=False)
-        )
+        # mlp to generate continuous relative position bias
+        self.cpb_mlp = nn.Sequential(nn.Linear(2, 512, bias=True),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(512, num_heads, bias=False))
 
-        # Get relative_coords_table
+        # get relative_coords_table
         relative_coords_h = torch.arange(-(self.window_size[0] - 1), self.window_size[0], dtype=torch.float32)
         relative_coords_w = torch.arange(-(self.window_size[1] - 1), self.window_size[1], dtype=torch.float32)
         relative_coords_table = torch.stack(
-            torch.meshgrid([relative_coords_h, relative_coords_w])
-        ).permute(1, 2, 0).contiguous().unsqueeze(0)  # shape: (1, 2*Wh-1, 2*Ww-1, 2)
-
+            torch.meshgrid([relative_coords_h,
+                            relative_coords_w],indexing='ij')).permute(1, 2, 0).contiguous().unsqueeze(0)  # 1, 2*Wh-1, 2*Ww-1, 2
         if pretrained_window_size[0] > 0:
             relative_coords_table[:, :, :, 0] /= (pretrained_window_size[0] - 1)
             relative_coords_table[:, :, :, 1] /= (pretrained_window_size[1] - 1)
@@ -112,20 +106,22 @@ class WindowAttention(nn.Module):
             relative_coords_table[:, :, :, 0] /= (self.window_size[0] - 1)
             relative_coords_table[:, :, :, 1] /= (self.window_size[1] - 1)
         relative_coords_table *= 8  # normalize to -8, 8
-        relative_coords_table = torch.sign(relative_coords_table) * torch.log2(torch.abs(relative_coords_table) + 1.0) / np.log2(8)
+        relative_coords_table = torch.sign(relative_coords_table) * torch.log2(
+            torch.abs(relative_coords_table) + 1.0) / np.log2(8)
+
         self.register_buffer("relative_coords_table", relative_coords_table)
 
-        # Get pair-wise relative position index for each token inside the window
+        # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
-        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # shape: (2, Wh, Ww)
-        coords_flatten = torch.flatten(coords, 1)  # shape: (2, Wh*Ww)
-        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # shape: (2, Wh*Ww, Wh*Ww)
-        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # shape: (Wh*Ww, Wh*Ww, 2)
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w],indexing='ij'))  # 2, Wh, Ww
+        coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
+        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
+        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
         relative_coords[:, :, 0] += self.window_size[0] - 1  # shift to start from 0
         relative_coords[:, :, 1] += self.window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
-        relative_position_index = relative_coords.sum(-1)  # shape: (Wh*Ww, Wh*Ww)
+        relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
         self.register_buffer("relative_position_index", relative_position_index)
         self.register_buffer("threshold", torch.tensor(100.))
         self.qkv = nn.Linear(dim, dim * 3, bias=True)
@@ -139,8 +135,8 @@ class WindowAttention(nn.Module):
     def forward(self, x, mask=None):
         """
         Args:
-            x: input features with shape (num_windows*B, N, C)
-            mask: (0 or -inf) mask with shape (num_windows, Wh*Ww, Wh*Ww) or None
+            x: input features with shape of (num_windows*B, N, C)
+            mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
         """
         B_, N, C = x.shape
         # qkv_bias = None
@@ -148,14 +144,14 @@ class WindowAttention(nn.Module):
         #     qkv_bias = torch.cat((self.q_bias,
         #                           torch.zeros_like(self.v_bias, requires_grad=False),
         #                           self.v_bias))
-        # # import ipdb; ipdb.set_trace()
         # qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
         qkv = self.qkv(x)
         qkv = qkv.reshape(B_, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
         # cosine attention
         attn = (F.normalize(q, dim=-1) @ F.normalize(k, dim=-1).transpose(-2, -1))
+        # logit_scale = torch.clamp(self.logit_scale, max=torch.log(torch.tensor(1. / 0.01))).exp()
         logit_scale = torch.clamp(self.logit_scale, max=torch.log(self.threshold)).exp()
         attn = attn * logit_scale
 
@@ -455,7 +451,7 @@ class PatchEmbed(nn.Module):
             self.norm = None
 
     def forward(self, x):
-        B, C, H, W = x.shape
+        # B, C, H, W = x.shape
         # # FIXME look at relaxing size constraints
         # assert H == self.img_size[0] and W == self.img_size[1], \
         #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
@@ -513,7 +509,7 @@ class SwinTransformerV2(nn.Module):
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
-        num_patches = self.patch_embed.num_patches
+        # num_patches = self.patch_embed.num_patches
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 
