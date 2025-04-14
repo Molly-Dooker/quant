@@ -86,7 +86,6 @@ def main(args):
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
         if args.default: eval(model, args.device, dataloader, 'default')
-        ipdb.set_trace()
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         # make exclude list
@@ -97,10 +96,9 @@ def main(args):
         logger.info(f'exclude : {exclude}')   
         # prepare model to quantize
         _quantize(model, weights=weights, activations=activations, exclude=exclude)
-        # print(model)  
         if activations is not None:
             with _Calibration():
-                calibrate(model, args.device, dataloader)
+                calibrate(model, args.device, dataloader,1000)
         freeze(model)
         eval(model, args.device, dataloader,'quantized')
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
