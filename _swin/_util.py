@@ -5,6 +5,19 @@ from optimum.quanto import (
     qint4,
     qint8,
 )
+import torch
+import collections
+def update_statedict(state_dict : collections.OrderedDict):
+    state_dict_temp={}
+    for key in state_dict.keys():
+        if not key.endswith('attn.qkv.weight'): continue
+        target_module= key[:-11]
+        q_bias = state_dict[f'{target_module}.q_bias']
+        v_bias = state_dict[f'{target_module}.v_bias']
+        qkv_bias = torch.cat((q_bias, torch.zeros_like(v_bias, requires_grad=False),v_bias))
+        state_dict_temp[f'{target_module}.qkv.bias']=qkv_bias
+    state_dict.update(state_dict_temp)
+    return state_dict
 
 
 def transform(data_batch, processor):

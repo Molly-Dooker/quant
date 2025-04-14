@@ -6,7 +6,7 @@ import math
 import ipdb
 from loguru import logger
 from tqdm import tqdm
-from _util import ipdb_sys_excepthook, keyword_to_itype, transform
+from _util import ipdb_sys_excepthook, keyword_to_itype, transform, update_statedict
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 import torch
 import evaluate
@@ -74,14 +74,17 @@ def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
     if not EVAL :
-        model = SwinTransformerV2(img_size=256, window_size=8)           
-        state_dict = torch.load('_model/model.pth')
+        model = SwinTransformerV2(img_size=256, window_size=8)
+        # download from MS official github page
+        # wget https://github.com/SwinTransformer/storage/releases/download/v2.0.0/swinv2_tiny_patch4_window8_256.pth
+        state_dict = torch.load('_model/swinv2_tiny_patch4_window8_256.pth')['model']
+        # now qkv(Linear) in WindowAttention module will have its own bias
+        state_dict = update_statedict(state_dict)
         model.load_state_dict(state_dict, strict=False)        
         processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-        # print("Model before quantization...")
         if args.default: eval(model, args.device, dataloader, 'default')
         ipdb.set_trace()
         weights = keyword_to_itype(args.weights)
@@ -98,10 +101,8 @@ def main(args):
         if activations is not None:
             with _Calibration():
                 calibrate(model, args.device, dataloader)
-        print("frozen model")
         freeze(model)
         eval(model, args.device, dataloader,'quantized')
-        ipdb.set_trace()
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
             json.dump(quantization_map(model), f)
@@ -110,22 +111,21 @@ def main(args):
         processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)    
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
             qmap = json.load(f)
-        config = ViTConfig.from_pretrained(args.model_name)
-        with init_empty_weights():
-            model = ViTForImageClassification.from_pretrained(args.model_name, config=config)
+        model = SwinTransformerV2(img_size=256, window_size=8)
         _requantize(model, state_dict, qmap, args.device)
         freeze(model)
         eval(model, args.device, dataloader,'reloaded')
+        ipdb.set_trace()
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="swin")
     parser.add_argument("--prefix", type=str, default="swin")
-    parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
+    # parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
     parser.add_argument("--dataset_name", type=str, default="Tsomaros/Imagenet-1k_validation")
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/ImageNet')
     parser.add_argument("--saveroot", type=str, default='./_model')
