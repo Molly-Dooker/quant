@@ -73,24 +73,22 @@ def calibrate(model, device, dataloader, num=10000):
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
-    if not EVAL : 
-        # model_base = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
-        # model_small = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-small-patch4-window8-256")
-        # model_tiny = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256")   
-        model = SwinTransformerV2() 
+    if not EVAL :     
+        model = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256") 
+        model = SwinTransformerV2(img_size=256, window_size=8)           
+        state_dict = torch.load('_model/default.pth')['model']
+        # ipdb.set_trace()
+        model.load_state_dict(state_dict, strict=False)
         processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-
         # print("Model before quantization...")
         if args.default: eval(model, args.device, dataloader, 'default')
-        ipdb.set_trace()
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         # make exclude list
-        exclude = ['vit.encoder.layer.5.output.dense',
-                   'vit.encoder.layer.9.attention.attention.query']
+        exclude = ['head']
         if args.exclude is not None:
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
@@ -101,6 +99,7 @@ def main(args):
         if activations is not None:
             with _Calibration():
                 calibrate(model, args.device, dataloader)
+        ipdb.set_trace()
         print("frozen model")
         freeze(model)
         eval(model, args.device, dataloader,'quantized')

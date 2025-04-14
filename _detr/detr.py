@@ -126,6 +126,7 @@ def main(args):
             # logger.info('Calibrate start...')
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
+        ipdb.set_trace()
         # logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
