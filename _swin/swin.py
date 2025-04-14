@@ -27,7 +27,7 @@ from optimum.quanto import (
     quantization_map
 )
 from _quanto import _quantize, _requantize, _Calibration
-from _model import SwinTransformerV2
+from _model import SwinTransformerV2, WindowAttention
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 def logger_enable(prefix=''):
     def console_filter(record):
@@ -73,12 +73,12 @@ def calibrate(model, device, dataloader, num=10000):
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
-    if not EVAL :     
-        model = AutoModelForImageClassification.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256") 
+    if not EVAL :
         model = SwinTransformerV2(img_size=256, window_size=8)           
-        state_dict = torch.load('_model/default.pth')['model']
-        # ipdb.set_trace()
+        state_dict = torch.load('_model/model.pth')   
+        ipdb.set_trace()     
         model.load_state_dict(state_dict, strict=False)
+        
         processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
@@ -98,11 +98,11 @@ def main(args):
         # print(model)  
         if activations is not None:
             with _Calibration():
-                calibrate(model, args.device, dataloader)
-        ipdb.set_trace()
+                calibrate(model, args.device, dataloader,1000)
         print("frozen model")
         freeze(model)
         eval(model, args.device, dataloader,'quantized')
+        ipdb.set_trace()
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
             json.dump(quantization_map(model), f)
