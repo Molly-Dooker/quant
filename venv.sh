@@ -17,4 +17,4 @@ pip install wandb==0.19.9
 pip install torchmetrics==1.7.1
 pip install timm==1.0.15
 pip install jupyter==1.1.1
-# aimet-torch 2.1.0+cu121
+pip install https://github.com/quic/aimet/releases/download/2.3.0/aimet_torch-2.3.0+cu121-py38-none-any.whl --no-deps

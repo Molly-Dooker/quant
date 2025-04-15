@@ -4,10 +4,11 @@ import json
 import itertools
 import math
 import ipdb
+import os
 from loguru import logger
 from tqdm import tqdm
-from _util import ipdb_sys_excepthook, keyword_to_itype, transform, update_statedict
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+from _util import ipdb_sys_excepthook, keyword_to_itype, transform
+import torchvision
 import torch
 import evaluate
 from accelerate import init_empty_weights
@@ -17,6 +18,7 @@ from transformers import (
     ViTConfig,
     ViTForImageClassification,
     ViTImageProcessor,
+    AutoImageProcessor,
 )
 from optimum.quanto import (
     QTensor,
@@ -27,8 +29,7 @@ from optimum.quanto import (
     quantization_map
 )
 from _quanto import _quantize, _requantize, _Calibration
-from _model import SwinTransformerV2, WindowAttention
-from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+from aimet_torch.batch_norm_fold import fold_all_batch_norms
 def logger_enable(prefix=''):
     def console_filter(record):
         # extra에 file_only가 True인 경우 콘솔 출력 제외
@@ -70,26 +71,29 @@ def calibrate(model, device, dataloader, num=10000):
             data = batch["pixel_values"].to(device)
             _ = model(data)
 
+
+
+
+
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
-    if not EVAL :
-        model = SwinTransformerV2(img_size=256, window_size=8)
-        # download from MS official github page
-        # wget https://github.com/SwinTransformer/storage/releases/download/v2.0.0/swinv2_tiny_patch4_window8_256.pth
-        state_dict = torch.load('_model/swinv2_tiny_patch4_window8_256.pth')['model']
-        # now qkv(Linear) in WindowAttention module will have its own bias
-        state_dict = update_statedict(state_dict)
-        model.load_state_dict(state_dict, strict=False)        
-        processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
+    if not EVAL : 
+
+        model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
+        dummy_input = torch.randn(1, 3, 224, 224)
+        fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
+        processor = AutoImageProcessor.from_pretrained("microsoft/resnet-50")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        # print("Model before quantization...")
         if args.default: eval(model, args.device, dataloader, 'default')
+
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         # make exclude list
-        exclude = ['head']
+        exclude = ['fc']
         if args.exclude is not None:
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
@@ -98,31 +102,34 @@ def main(args):
         _quantize(model, weights=weights, activations=activations, exclude=exclude)
         if activations is not None:
             with _Calibration():
-                calibrate(model, args.device, dataloader)
+                calibrate(model, args.device, dataloader, 1000)
+        print("frozen model")
         freeze(model)
-        eval(model, args.device, dataloader,'quantized')
+        eval(model, args.device, dataloader,'quantized')        
+        os.makedirs(args.saveroot,exist_ok=True)
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
             json.dump(quantization_map(model), f)
 
     if EVAL:
-        processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
+        processor = ViTImageProcessor.from_pretrained(args.model_name)
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)    
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
         state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
             qmap = json.load(f)
-        model = SwinTransformerV2(img_size=256, window_size=8)
+        config = ViTConfig.from_pretrained(args.model_name)
+        with init_empty_weights():
+            model = ViTForImageClassification.from_pretrained(args.model_name, config=config)
         _requantize(model, state_dict, qmap, args.device)
         freeze(model)
         eval(model, args.device, dataloader,'reloaded')
-        ipdb.set_trace()
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="swin")
-    parser.add_argument("--prefix", type=str, default="swin")
+    parser = argparse.ArgumentParser(description="resnet")
+    parser.add_argument("--prefix", type=str, default="resnet")
     # parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
     parser.add_argument("--dataset_name", type=str, default="Tsomaros/Imagenet-1k_validation")
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/ImageNet')
