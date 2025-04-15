@@ -78,7 +78,7 @@ def main(args):
         # download from MS official github page
         # wget https://github.com/SwinTransformer/storage/releases/download/v2.0.0/swinv2_tiny_patch4_window8_256.pth
         state_dict = torch.load('_model/swinv2_tiny_patch4_window8_256.pth')['model']
-        # now qkv(Linear) in WindowAttention module will have its own bias
+        # qkv(Linear) in WindowAttention module will have its own bias
         state_dict = update_statedict(state_dict)
         model.load_state_dict(state_dict, strict=False)        
         processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
