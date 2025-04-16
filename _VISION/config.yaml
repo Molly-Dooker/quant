@@ -3,7 +3,7 @@ distributed_type: FSDP
 # Can be one of "no", "fp16", or "bf16" (see `transformer_engine.yaml` for `fp8`, but it works for FSDP as well)
 mixed_precision: 'bf16'
 # Specify the number of GPUs to use
-num_processes: 2
+num_processes: 4
 # Then we can specify the FSDP config
 fsdp_config:
   fsdp_activation_checkpointing: false
