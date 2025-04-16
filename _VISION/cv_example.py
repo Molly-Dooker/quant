@@ -210,3 +210,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+    # accelerate launch --config_file config.yaml cv_example.py --data_dir /Data/Dataset/sample_data/images 

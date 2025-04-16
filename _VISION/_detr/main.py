@@ -123,7 +123,6 @@ def main(args):
             # logger.info('Calibrate start...')
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
-        ipdb.set_trace()
         # logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
@@ -156,7 +155,7 @@ def main(args):
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description="detr")
-    parser.add_argument("--prefix", type=str, default="test1")
+    parser.add_argument("--prefix", type=str, default="detr1")
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--coco_dir", type=str, default='/Data/Dataset/coco')
     parser.add_argument("--saveroot", type=str, default='./_model')
