@@ -5,20 +5,79 @@ from optimum.quanto import (
     qint8,
 )
 from transformers.models.detr.modeling_detr import DetrFrozenBatchNorm2d
-
-
+import ipdb
+from typing import Any, List, Mapping, Tuple, Union
 import torch
 import torch.nn as nn
 
 def keyword_to_itype(k):
     return {"none": None, "int4": qint4, "int8": qint8, "float8": qfloat8}[k]
 
+def format_image_annotations_as_coco(
+    image_id: str, categories: List[int], areas: List[float], bboxes: List[Tuple[float]]
+) -> dict:
+    """Format one set of image annotations to the COCO format
+
+    Args:
+        image_id (str): image id. e.g. "0001"
+        categories (List[int]): list of categories/class labels corresponding to provided bounding boxes
+        areas (List[float]): list of corresponding areas to provided bounding boxes
+        bboxes (List[Tuple[float]]): list of bounding boxes provided in COCO format
+            ([center_x, center_y, width, height] in absolute coordinates)
+
+    Returns:
+        dict: {
+            "image_id": image id,
+            "annotations": list of formatted annotations
+        }
+    """
+    if image_id is None:
+        return None
+    annotations = []
+    for category, area, bbox in zip(categories, areas, bboxes):
+        formatted_annotation = {
+            "image_id": image_id,
+            "category_id": category,
+            "iscrowd": 0,
+            "area": area,
+            "bbox": list(bbox),
+        }
+        annotations.append(formatted_annotation)
+
+    return {
+        "image_id": image_id,
+        "annotations": annotations,
+    }
 
 
-def custom_transform(img, target, processor):
+def train_transform(img, targets, processor):
+    img = img.convert('RGB')    
+
+    image_id = None
+    categories = []
+    areas= []
+    bboxes = []
+
+    for i,target in enumerate(targets):
+        if i==0: image_id=str(target['image_id'])
+        category = target['category_id']
+        area = target['area']
+        bbox = target['bbox']
+        categories.append(category)
+        areas.append(area)
+        bboxes.append(bbox)
+    annotations = format_image_annotations_as_coco(
+        image_id, categories=categories, areas=areas, bboxes=bboxes
+    )
+    result = processor(images=img, annotations=annotations, return_tensors="pt")
+    result.pop("pixel_mask", None)
+    return (result), targets
+
+
+def eval_transform(img, targets, processor):
     src = processor(img.convert('RGB'), return_tensors="pt")    
     size = img.size[::-1]
-    return (src['pixel_values'], size), target
+    return (src['pixel_values'], size), targets
 
 def _collate_fn(batch):                
     pixel_values = []
@@ -38,6 +97,27 @@ def _collate_fn(batch):
     return pixel_values, target, Size
 
 
+def _collate_fn_train(batch):   
+    ipdb.set_trace()             
+    pixel_values = []
+    target       = []
+    Size         = []
+    for i,item in enumerate(batch):
+
+        item = item[0]
+        print(i,item.keys())
+        break
+        pixel_values.append(item[0][0].squeeze(0))
+        Size.append(item[0][1])
+        target_=[]
+        for t in item[1]:
+            del t['segmentation']
+            del t['area']
+            del t['iscrowd']
+            target_.append(t)
+        target.append(target_)
+    pixel_values = torch.stack(pixel_values)
+    return pixel_values, target, Size
 
 def fold_bn_into_conv(conv: nn.Conv2d, bn: DetrFrozenBatchNorm2d):
     """

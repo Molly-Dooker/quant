@@ -12,7 +12,7 @@ from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
 from transformers import DetrImageProcessor, DetrForObjectDetection
 from tqdm import tqdm
-from _util import fold_frozen_bn_to_identity, custom_transform, _collate_fn, keyword_to_itype
+from _util import fold_frozen_bn_to_identity, train_transform, eval_transform, _collate_fn_train, keyword_to_itype, _collate_fn
 from _quanto import _quantize, _Calibration, _requantize
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
@@ -94,7 +94,6 @@ def calibrate(model, device, dataloader, num=10000):
         for idx, batch in enumerate(tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating...")):
             _ = model(batch[0].to(device))               
 
-
 def main(args):
     logger_enable(args.prefix)
     # logger.info('start!')
@@ -102,32 +101,29 @@ def main(args):
     if not EVAL:
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
-        processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
-
+        processor = DetrImageProcessor().from_pretrained(
+            pretrained_model_name_or_path=args.model_name,
+            revision="no_timm", 
+            size={"height": args.size, "width": args.size},
+            )
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
-        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : custom_transform(img, target, processor))
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn, num_workers=args.num_workers)
+        # ipdb.set_trace()
+        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : train_transform(img, target, processor))        
+        dataloader = DataLoader(dataset, batch_size=512, shuffle=False, collate_fn=_collate_fn_train)#, num_workers=args.num_workers)
+        
+
         # base model evaluation
         if args.default: eval(model, args.device, dataloader, processor, 'default')
 
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
-        exclude = ['class_labels_classifier', 're:^bbox_predictor.*']#, 're:^model.backbone.conv_encoder.model.encoder.stages.0.layers.0.*', 're:^model.encoder.layers.2.self_attn.*', 're:^model.encoder.layers.5.self_attn.*']
+        exclude = ['class_labels_classifier', 're:^bbox_predictor.*']
         if args.exclude is not None:
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')        
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
-
-        
-        model.to(args.device)
-        model.train()
-        for src, targets, Size in tqdm(dataloader,desc='eval...'):
-            src = src.to(args.device)
-            outputs = model(src)
-            ipdb.set_trace()
-
         if activations is not None:
             # logger.info('Calibrate start...')
             with _Calibration(): # custom Calibration
@@ -168,7 +164,7 @@ if __name__ == '__main__':
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--coco_dir", type=str, default='/Data/Dataset/coco')
     parser.add_argument("--saveroot", type=str, default='./_model')
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])

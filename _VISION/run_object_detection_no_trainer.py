@@ -141,13 +141,12 @@ def augment_and_transform_batch(
             image_id, output["category"], objects["area"], output["bboxes"]
         )
         annotations.append(formatted_annotations)
-
     # Apply the image processor transformations: resizing, rescaling, normalization
-    result = image_processor(images=images, annotations=annotations, return_tensors="pt")
 
+    result = image_processor(images=images, annotations=annotations, return_tensors="pt")
+    ipdb.set_trace()
     if not return_pixel_mask:
         result.pop("pixel_mask", None)
-
     return result
 
 
@@ -451,8 +450,6 @@ def main():
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
     dataset = load_dataset(args.dataset_name, cache_dir=args.cache_dir, trust_remote_code=args.trust_remote_code)
-    if accelerator.is_main_process:
-        ipdb.set_trace()
     # If we don't have a validation split, split off a percentage of train as validation.
     args.train_val_split = None if "validation" in dataset.keys() else args.train_val_split
     if isinstance(args.train_val_split, float) and args.train_val_split > 0.0:
@@ -492,7 +489,6 @@ def main():
         use_fast=args.use_fast,
         **common_pretrained_args,
     )
-
     # ------------------------------------------------------------------------------------------------
     # Define image augmentations and dataset transforms
     # ------------------------------------------------------------------------------------------------
@@ -538,7 +534,9 @@ def main():
         train_dataset = dataset["train"].with_transform(train_transform_batch)
         valid_dataset = dataset["validation"].with_transform(validation_transform_batch)
         test_dataset = dataset["test"].with_transform(validation_transform_batch)
-
+    if accelerator.is_main_process:
+        for X in valid_dataset:
+            ipdb.set_trace()
     dataloader_common_args = {
         "num_workers": args.dataloader_num_workers,
         "collate_fn": collate_fn,
