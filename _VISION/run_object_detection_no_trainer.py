@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Finetuning 🤗 Transformers model for object detection with Accelerate."""
-
+import ipdb
 import argparse
 import json
 import logging
@@ -452,9 +452,7 @@ def main():
     # download the dataset.
     dataset = load_dataset(args.dataset_name, cache_dir=args.cache_dir, trust_remote_code=args.trust_remote_code)
     if accelerator.is_main_process:
-        import ipdb;
         ipdb.set_trace()
-
     # If we don't have a validation split, split off a percentage of train as validation.
     args.train_val_split = None if "validation" in dataset.keys() else args.train_val_split
     if isinstance(args.train_val_split, float) and args.train_val_split > 0.0:
