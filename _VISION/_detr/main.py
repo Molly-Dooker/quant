@@ -120,10 +120,8 @@ def main(args):
         logger.info(f'exclude : {exclude}')        
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
         if activations is not None:
-            # logger.info('Calibrate start...')
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
-        # logger.info('frozen model')    
         freeze(model)
         eval(model, args.device, dataloader, processor, 'quantized')
         os.makedirs(args.saveroot,exist_ok=True)
