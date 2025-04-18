@@ -155,11 +155,9 @@ class WindowAttention(nn.Module):
         logit_scale = torch.clamp(self.logit_scale, max=torch.log(self.threshold)).exp()
         attn = attn * logit_scale
 
-        # 여기서 self.relative_coords_table를 2차원으로 reshape하여 cpb_mlp에 전달합니다.
         B_rc, H_rc, W_rc, C_rc = self.relative_coords_table.shape  # B_rc=1, C_rc=2
         relative_coords_2d = self.relative_coords_table.view(-1, C_rc)  # shape: ((2*Wh-1)*(2*Ww-1), 2)
         relative_position_bias_table = self.cpb_mlp(relative_coords_2d).view(H_rc * W_rc, self.num_heads)
-        # 원래의 relative_position_index를 이용하여 relative position bias 재구성
         relative_position_bias = relative_position_bias_table[self.relative_position_index.view(-1)].view(
             self.window_size[0] * self.window_size[1],
             self.window_size[0] * self.window_size[1],
