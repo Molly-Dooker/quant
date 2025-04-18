@@ -32,7 +32,7 @@ def format_image_annotations_as_coco(
         }
     """
     if image_id is None:
-        return None
+        return {'image_id': '0', 'annotations': []}
     annotations = []
     for category, area, bbox in zip(categories, areas, bboxes):
         formatted_annotation = {
@@ -71,7 +71,7 @@ def train_transform(img, targets, processor):
     )
     result = processor(images=img, annotations=annotations, return_tensors="pt")
     result.pop("pixel_mask", None)
-    return (result), targets
+    return result, targets
 
 
 def eval_transform(img, targets, processor):
@@ -79,7 +79,7 @@ def eval_transform(img, targets, processor):
     size = img.size[::-1]
     return (src['pixel_values'], size), targets
 
-def _collate_fn(batch):                
+def _collate_fn_eval(batch):                
     pixel_values = []
     target       = []
     Size         = []
@@ -97,27 +97,17 @@ def _collate_fn(batch):
     return pixel_values, target, Size
 
 
-def _collate_fn_train(batch):   
-    ipdb.set_trace()             
-    pixel_values = []
-    target       = []
-    Size         = []
-    for i,item in enumerate(batch):
-
-        item = item[0]
-        print(i,item.keys())
-        break
-        pixel_values.append(item[0][0].squeeze(0))
-        Size.append(item[0][1])
-        target_=[]
-        for t in item[1]:
-            del t['segmentation']
-            del t['area']
-            del t['iscrowd']
-            target_.append(t)
-        target.append(target_)
-    pixel_values = torch.stack(pixel_values)
-    return pixel_values, target, Size
+def _collate_fn_train(batch):             
+    images = []
+    labels = []
+    for i,item in enumerate(batch):       
+        item   = item[0]
+        image  = item['pixel_values'].squeeze(0)
+        label = item['labels'][0]
+        images.append(image)
+        labels.append(label)
+    images = torch.stack(images)
+    return images, labels
 
 def fold_bn_into_conv(conv: nn.Conv2d, bn: DetrFrozenBatchNorm2d):
     """

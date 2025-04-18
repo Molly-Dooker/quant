@@ -14,7 +14,7 @@ from transformers import DetrImageProcessor, DetrForObjectDetection
 from datasets import load_dataset
 from tqdm import tqdm
 
-from _util import fold_frozen_bn_to_identity, custom_transform, _collate_fn, keyword_to_itype
+from _util import fold_frozen_bn_to_identity, custom_transform, _collate_fn_eval, keyword_to_itype
 from _quanto import _quantize, _Calibration, _requantize
 
 from safetensors.torch import load_file, save_file
@@ -113,7 +113,7 @@ def main(args):
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : custom_transform(img, target, processor))
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn, num_workers=args.num_workers)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         # base model evaluation
         if args.default: eval(model, args.device, dataloader, processor, 'default')
 
@@ -172,7 +172,7 @@ def main(args):
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : custom_transform(img, target, processor))
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn, num_workers=args.num_workers)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         model_reloaded = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model_reloaded)
 

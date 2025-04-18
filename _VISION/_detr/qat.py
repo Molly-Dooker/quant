@@ -10,9 +10,17 @@ from loguru import logger
 import torch
 from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
-from transformers import DetrImageProcessor, DetrForObjectDetection
+from transformers import (
+    DetrImageProcessor, 
+    DetrForObjectDetection,
+    AutoConfig,
+    AutoImageProcessor,
+    AutoModelForObjectDetection,
+    SchedulerType,
+    get_scheduler,
+)
 from tqdm import tqdm
-from _util import fold_frozen_bn_to_identity, train_transform, eval_transform, _collate_fn_train, keyword_to_itype, _collate_fn
+from _util import fold_frozen_bn_to_identity, train_transform, eval_transform, _collate_fn_train, keyword_to_itype, _collate_fn_eval
 from _quanto import _quantize, _Calibration, _requantize
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
@@ -27,6 +35,7 @@ from optimum.quanto import (
     requantize,
     quantize_activation
 )
+from torch.utils.data import Subset
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -101,6 +110,14 @@ def main(args):
     if not EVAL:
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
+        weights = keyword_to_itype(args.weights)
+        activations = keyword_to_itype(args.activations)
+        exclude = ['class_labels_classifier', 're:^bbox_predictor.*']
+        if args.exclude is not None:
+            exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
+            if args.exclude=='': exclude = []
+        logger.info(f'exclude : {exclude}')        
+        _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
         processor = DetrImageProcessor().from_pretrained(
             pretrained_model_name_or_path=args.model_name,
             revision="no_timm", 
@@ -109,12 +126,55 @@ def main(args):
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         # ipdb.set_trace()
-        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : train_transform(img, target, processor))        
-        dataloader = DataLoader(dataset, batch_size=512, shuffle=False, collate_fn=_collate_fn_train)#, num_workers=args.num_workers)
-        
+        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : train_transform(img, target, processor))
+        dataset = Subset(dataset, list(range(160)))     
+        dataloader = DataLoader(dataset, batch_size=16, shuffle=False, collate_fn=_collate_fn_train, num_workers=args.num_workers)
+        model.train()
+        model.to(args.device)
+        optimizer = torch.optim.AdamW(
+            list(model.parameters()),
+            lr=5e-05,
+        )
+        # ipdb.set_trace()
+        # lr_scheduler = get_scheduler(
+        # #     name=args.lr_scheduler_type,
+        # #     optimizer=optimizer,
+        # #     num_warmup_steps=args.num_warmup_steps * accelerator.num_processes,
+        # #     num_training_steps=args.max_train_steps
+        # #     if overrode_max_train_steps
+        # #     else args.max_train_steps * accelerator.num_processes,
+        # # )
+
+        for batch in range(10):
+            total_loss = 0
+            for pixel_values,labels in tqdm(dataloader):            
+                pixel_values=pixel_values.to(args.device)
+                for obj in labels:
+                    for key, val in obj.items():
+                        if isinstance(val, torch.Tensor):
+                            obj[key] = val.to(args.device)
+
+                outputs = model(pixel_values=pixel_values,labels=labels)
+                loss = outputs.loss
+                total_loss+=loss
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+            print(f'batch{batch} loss:{total_loss}')
+        ipdb.set_trace()
+
+
+        processor2 = DetrImageProcessor().from_pretrained(
+            pretrained_model_name_or_path=args.model_name,
+            revision="no_timm", 
+            size={"height": args.size, "width": args.size},
+            )
+        dataset2 = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, processor2))
+        dataloader2 = DataLoader(dataset2, batch_size=64, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
+        freeze(model)
 
         # base model evaluation
-        if args.default: eval(model, args.device, dataloader, processor, 'default')
+        if args.default: eval(model, args.device, dataloader2, processor2, 'qat')
 
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
@@ -145,7 +205,7 @@ def main(args):
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : custom_transform(img, target, processor))
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn, num_workers=args.num_workers)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         model_reloaded = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model_reloaded)
 
@@ -164,7 +224,7 @@ if __name__ == '__main__':
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--coco_dir", type=str, default='/Data/Dataset/coco')
     parser.add_argument("--saveroot", type=str, default='./_model')
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])

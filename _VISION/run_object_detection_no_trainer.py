@@ -144,7 +144,6 @@ def augment_and_transform_batch(
     # Apply the image processor transformations: resizing, rescaling, normalization
 
     result = image_processor(images=images, annotations=annotations, return_tensors="pt")
-    ipdb.set_trace()
     if not return_pixel_mask:
         result.pop("pixel_mask", None)
     return result
@@ -534,9 +533,6 @@ def main():
         train_dataset = dataset["train"].with_transform(train_transform_batch)
         valid_dataset = dataset["validation"].with_transform(validation_transform_batch)
         test_dataset = dataset["test"].with_transform(validation_transform_batch)
-    if accelerator.is_main_process:
-        for X in valid_dataset:
-            ipdb.set_trace()
     dataloader_common_args = {
         "num_workers": args.dataloader_num_workers,
         "collate_fn": collate_fn,
@@ -583,6 +579,9 @@ def main():
         if overrode_max_train_steps
         else args.max_train_steps * accelerator.num_processes,
     )
+    if accelerator.is_main_process:
+        ipdb.set_trace()
+
 
     # Prepare everything with our `accelerator`.
     model, optimizer, train_dataloader, valid_dataloader, test_dataloader, lr_scheduler = accelerator.prepare(
