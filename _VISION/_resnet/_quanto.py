@@ -101,7 +101,6 @@ def _quantize(
 
         if isinstance(m,torch.nn.LayerNorm): continue
         if is_match(name,exclude): continue
-        ipdb.set_trace()
         _quantize_submodule(model, name, m, weights=weights, activations=activations, optimizer=optimizer)
 
     for name, m in model.named_modules():
