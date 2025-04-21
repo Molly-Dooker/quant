@@ -62,9 +62,8 @@ def eval(model, device, dataloader, processor, prefix=''):
                 #     reg = reg[0:1] if reg is not None else None
                 # forward_time = time.time()    
                 # results = processor.post_process_object_detection(outputs, target_sizes=Size, threshold=0.001)
-                dets = processor(hm, wh, reg, metas)
-                ipdb.set_trace()
-                all_results.extend(dets)
+                results = processor(hm, wh, reg, metas)
+                all_results.extend(results)
                 all_targets.extend(targets)
 
         coco_results = []
@@ -113,28 +112,132 @@ import sys
 from PIL import Image
 import numpy as np
 
+label2id = {
+    'N/A': 83,
+    'airplane': 5,
+    'apple': 53,
+    'backpack': 27,
+    'banana': 52,
+    'baseball bat': 39,
+    'baseball glove': 40,
+    'bear': 23,
+    'bed': 65,
+    'bench': 15,
+    'bicycle': 2,
+    'bird': 16,
+    'boat': 9,
+    'book': 84,
+    'bottle': 44,
+    'bowl': 51,
+    'broccoli': 56,
+    'bus': 6,
+    'cake': 61,
+    'car': 3,
+    'carrot': 57,
+    'cat': 17,
+    'cell phone': 77,
+    'chair': 62,
+    'clock': 85,
+    'couch': 63,
+    'cow': 21,
+    'cup': 47,
+    'dining table': 67,
+    'dog': 18,
+    'donut': 60,
+    'elephant': 22,
+    'fire hydrant': 11,
+    'fork': 48,
+    'frisbee': 34,
+    'giraffe': 25,
+    'hair drier': 89,
+    'handbag': 31,
+    'horse': 19,
+    'hot dog': 58,
+    'keyboard': 76,
+    'kite': 38,
+    'knife': 49,
+    'laptop': 73,
+    'microwave': 78,
+    'motorcycle': 4,
+    'mouse': 74,
+    'orange': 55,
+    'oven': 79,
+    'parking meter': 14,
+    'person': 1,
+    'pizza': 59,
+    'potted plant': 64,
+    'refrigerator': 82,
+    'remote': 75,
+    'sandwich': 54,
+    'scissors': 87,
+    'sheep': 20,
+    'sink': 81,
+    'skateboard': 41,
+    'skis': 35,
+    'snowboard': 36,
+    'spoon': 50,
+    'sports ball': 37,
+    'stop sign': 13,
+    'suitcase': 33,
+    'surfboard': 42,
+    'teddy bear': 88,
+    'tennis racket': 43,
+    'tie': 32,
+    'toaster': 80,
+    'toilet': 70,
+    'toothbrush': 90,
+    'traffic light': 10,
+    'train': 7,
+    'truck': 8,
+    'tv': 72,
+    'umbrella': 28,
+    'vase': 86,
+    'wine glass': 46,
+    'zebra': 24
+}
+
+
+coco_class_name = [
+     'person', 'bicycle', 'car', 'motorcycle', 'airplane',
+     'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant',
+     'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse',
+     'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
+     'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis',
+     'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove',
+     'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass',
+     'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich',
+     'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
+     'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv',
+     'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
+     'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
+     'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+]
 
 def _postprocessor(hm,wh,reg,metas, cat_spec_wh, K, scale, post0, post1, post2):
     dets = post0(hm, wh, reg=reg, cat_spec_wh=cat_spec_wh, K=K) #ctdet_decode
-    dets_ = []
+    results = []
     for det, meta in zip(dets, metas):
         # 배치당 
         scores = []; boxes =[]; labels=[];
         det = det.unsqueeze(0)
         det1 = post1(det, meta, scale) #Ctdet.post_process
         det2 = post2(det1)
-        # coco 변환
         for cls in range(1,81): # coco 80 class 
             if det2[cls].shape[0]==0: continue
-            box = det2[cls][:,:4]
+            box = det2[cls][:,:4] #xyxy 방식
             score = det2[cls][:,-1]
-            label = torch.tensor([cls-1]*box.shape[0])
+            label = label2id[coco_class_name[cls-1]]
+            label = torch.tensor([label]*box.shape[0])
             scores.append(score)
             boxes.append(box)
             labels.append(label)
-        boxes = np.vstack(boxes)
-        scores = np.concat(scores)
-        labels = np.concat(labels)
+        boxes = torch.tensor(np.vstack(boxes))
+        scores = torch.tensor(np.concat(scores))
+        labels = torch.tensor(np.concat(labels))
+        result = {'scores':scores, 'labels':labels, 'boxes':boxes}
+        results.append(result)
+    return results
+    
         
 
 
@@ -164,7 +267,7 @@ def main(args):
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         preprocessor = lambda image : Ctdet.pre_process(image, 1.0 ,None)    
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval)#, num_workers=args.num_workers)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
 
         model = Ctdet.model
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
@@ -232,7 +335,7 @@ if __name__ == '__main__':
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--coco_dir", type=str, default='/Data/Dataset/coco')
     parser.add_argument("--saveroot", type=str, default='./_model')
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
