@@ -421,7 +421,8 @@ class DLASeg(nn.Module):
         z = {}
         for head in self.heads:
             z[head] = self.__getattr__(head)(y[-1])
-        return [z]
+        # return [z]
+        return z
     
 
 
@@ -534,7 +535,7 @@ class CenterNet(nn.Module):
 
   def process(self, images, return_time=False):
     with torch.no_grad():
-      output = self.model(images)[-1]
+      output = self.model(images)      
       hm = output['hm'].sigmoid_()
       wh = output['wh']
       reg = output['reg'] if self.opt.reg_offset else None
@@ -544,7 +545,7 @@ class CenterNet(nn.Module):
         reg = reg[0:1] if reg is not None else None
       forward_time = time.time()       
       dets = ctdet_decode(hm, wh, reg=reg, cat_spec_wh=self.opt.cat_spec_wh, K=self.opt.K)
-      
+
     if return_time:
       return output, dets, forward_time
     else:
@@ -562,6 +563,7 @@ class CenterNet(nn.Module):
     return dets[0]
 
   def merge_outputs(self, detections):
+    if isinstance(detections,dict): detections= [detections]    
     results = {}
     for j in range(1, self.num_classes + 1):
       results[j] = np.concatenate(
@@ -598,6 +600,7 @@ class CenterNet(nn.Module):
     for j in range(1, self.num_classes + 1):
       for bbox in results[j]:
         if bbox[4] > self.opt.vis_thresh:
+          ipdb.set_trace()
           debugger.add_coco_bbox(bbox[:4], j - 1, bbox[4], img_id='ctdet')
     debugger.save_img(imgId='ctdet', path='./')
 
@@ -634,8 +637,9 @@ class CenterNet(nn.Module):
       images = images.to(self.opt.device)
       pre_process_time = time.time()
       pre_time += pre_process_time - scale_start_time
+
       output, dets, forward_time = self.process(images, return_time=True)
-       
+
       net_time += forward_time - pre_process_time
       decode_time = time.time()
       dec_time += decode_time - forward_time
@@ -647,7 +651,7 @@ class CenterNet(nn.Module):
       detections.append(dets_)
 
     results = self.merge_outputs(detections)
-    
+
     end_time = time.time()
     merge_time += end_time - post_process_time
     tot_time += end_time - start_time

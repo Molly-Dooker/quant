@@ -5,6 +5,7 @@ import math
 import itertools
 import os
 import json
+import ipdb.stdout
 from loguru import logger
 
 import torch
@@ -49,11 +50,21 @@ def eval(model, device, dataloader, processor, prefix=''):
         all_results = []
         all_targets = []
         with torch.no_grad():
-            for src, targets, Size in tqdm(dataloader,desc='eval...'):
+            for src, targets, metas in tqdm(dataloader,desc='eval...'):
                 src = src.to(device)
-                outputs = model(src)
-                results = processor.post_process_object_detection(outputs, target_sizes=Size, threshold=0.001)
-                all_results.extend(results)
+                output = model(src)
+                hm  = output['hm'].sigmoid_()
+                wh  = output['wh']
+                reg = output['reg'] #if self.opt.reg_offset else None
+                # if self.opt.flip_test:
+                #     hm = (hm[0:1] + flip_tensor(hm[1:2])) / 2
+                #     wh = (wh[0:1] + flip_tensor(wh[1:2])) / 2
+                #     reg = reg[0:1] if reg is not None else None
+                # forward_time = time.time()    
+                # results = processor.post_process_object_detection(outputs, target_sizes=Size, threshold=0.001)
+                dets = processor(hm, wh, reg, metas)
+                ipdb.set_trace()
+                all_results.extend(dets)
                 all_targets.extend(targets)
 
         coco_results = []
@@ -96,10 +107,45 @@ def calibrate(model, device, dataloader, num=10000):
 
 
 from _centernet import Config, CenterNet
+from utils.functions import ctdet_decode
 import cv2
 import sys
 from PIL import Image
 import numpy as np
+
+
+def _postprocessor(hm,wh,reg,metas, cat_spec_wh, K, scale, post0, post1, post2):
+    dets = post0(hm, wh, reg=reg, cat_spec_wh=cat_spec_wh, K=K) #ctdet_decode
+    dets_ = []
+    for det, meta in zip(dets, metas):
+        # 배치당 
+        scores = []; boxes =[]; labels=[];
+        det = det.unsqueeze(0)
+        det1 = post1(det, meta, scale) #Ctdet.post_process
+        det2 = post2(det1)
+        # coco 변환
+        for cls in range(1,81): # coco 80 class 
+            if det2[cls].shape[0]==0: continue
+            box = det2[cls][:,:4]
+            score = det2[cls][:,-1]
+            label = torch.tensor([cls-1]*box.shape[0])
+            scores.append(score)
+            boxes.append(box)
+            labels.append(label)
+        boxes = np.vstack(boxes)
+        scores = np.concat(scores)
+        labels = np.concat(labels)
+        
+
+
+            
+
+
+
+
+
+    return dets_
+
 def main(args):
     logger_enable(args.prefix)
     # logger.info('start!')
@@ -110,17 +156,24 @@ def main(args):
         opt = Config(load_model='_model/ctdet_coco_dla_2x.pth', device=args.device)       
         Ctdet = CenterNet(opt)
         # img = cv2.imread("im1.jpg")
-        # Ctdet.model.to(args.device)   
+        # Ctdet.model.eval()
+        # Ctdet.model.to(args.device)
         # Ctdet.run(img)     
-
+        # return
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         preprocessor = lambda image : Ctdet.pre_process(image, 1.0 ,None)    
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval)#, num_workers=args.num_workers)
-        for X in dataloader:
-            break
-        ipdb.set_trace()
+
+        model = Ctdet.model
+        processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
+        eval(model, args.device, dataloader, processor, 'default')
+
+                
+
+
+
         return
 
 
