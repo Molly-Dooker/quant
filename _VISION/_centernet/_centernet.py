@@ -481,9 +481,9 @@ def load_model(model, model_path, optimizer=None, resume=False,
     return model
 
 class CenterNet(nn.Module):
-  def __init__(self, opt, device):
+  def __init__(self, opt):
     super(CenterNet, self).__init__()
-    self.weight_path = "../weights/ctdet_coco_dla_2x.pth"
+    self.weight_path = opt.load_model
     print('Creating model...')
     print("opt: ", opt)
     self.mean  = opt.mean
@@ -491,7 +491,7 @@ class CenterNet(nn.Module):
     self.model = DLASeg(pretrained=True)
 
     self.model = load_model(self.model, self.weight_path)
-    self.model = self.model.to(device)
+    # self.model = self.model.to(device)
     self.model.eval()
     self.mean = np.array(self.mean, dtype=np.float32).reshape(1, 1, 3)
     self.std = np.array(self.std, dtype=np.float32).reshape(1, 1, 3)
@@ -500,7 +500,7 @@ class CenterNet(nn.Module):
     self.scales = opt.test_scales
     self.opt = opt
     self.pause = True
-    self.opt.device = device
+    # self.opt.device = device
 
   def pre_process(self, image, scale, meta=None):
     height, width = image.shape[0:2]
@@ -651,7 +651,7 @@ class CenterNet(nn.Module):
     end_time = time.time()
     merge_time += end_time - post_process_time
     tot_time += end_time - start_time
-    print("Debug")
+    # print("Debug")
     self.show_results(debugger, image, results)
     
     return {'results': results, 'tot': tot_time, 'load': load_time,
@@ -661,7 +661,7 @@ class CenterNet(nn.Module):
 
 
 class Config: 
-   def __init__(self,):
+   def __init__(self,load_model, device):
     self.K=100
     self.aggr_weight=0.0
     self.agnostic_ex=False
@@ -706,7 +706,9 @@ class Config:
     self.input_w=512
     self.keep_res=False
     self.kitti_split='3dop'
-    self.load_model='../weights/ctdet_coco_dla_2x.pth'
+    # self.load_model='../weights/ctdet_coco_dla_2x.pth'
+    self.load_model = load_model
+    self.device = device
     self.lr=0.000125
     self.lr_step=[90, 120]
     self.master_batch_size=32

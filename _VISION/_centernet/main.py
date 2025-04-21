@@ -95,12 +95,35 @@ def calibrate(model, device, dataloader, num=10000):
             _ = model(batch[0].to(device))               
 
 
+from _centernet import Config, CenterNet
+import cv2
+import sys
+from PIL import Image
+import numpy as np
 def main(args):
     logger_enable(args.prefix)
     # logger.info('start!')
     EVAL = args.eval
     if not EVAL:
+
+        torch.manual_seed(0)
+        opt = Config(load_model='_model/ctdet_coco_dla_2x.pth', device=args.device)       
+        Ctdet = CenterNet(opt)
+        # img = cv2.imread("im1.jpg")
+        # Ctdet.model.to(args.device)   
+        # Ctdet.run(img)     
+
+
+        preprocessor = lambda image : Ctdet.pre_process(image, 1.0 ,None)    
+        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
+
+        for X in dataset : 
+            break
         ipdb.set_trace()
+        
+        
+        return
+
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
         processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
@@ -152,11 +175,11 @@ def main(args):
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description="centernet")
-    parser.add_argument("--prefix", type=str, default="centernet")
-    # parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
+    parser.add_argument("--prefix", type=str, default="centernet1")
+    parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-50")
     parser.add_argument("--coco_dir", type=str, default='/Data/Dataset/coco')
     parser.add_argument("--saveroot", type=str, default='./_model')
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
