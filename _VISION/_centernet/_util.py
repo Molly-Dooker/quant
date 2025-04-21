@@ -76,29 +76,29 @@ def train_transform(img, targets, processor):
 
 
 def eval_transform(img, targets, processor):
-    ipdb.set_trace()
     img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-    images, meta = processor(img)
-    src = processor(img.convert('RGB'), return_tensors="pt")    
-    size = img.size[::-1]
-    return (src['pixel_values'], size), targets
+    img, meta = processor(img)    
+    return (img,meta), targets
 
-def _collate_fn_eval(batch):                
-    pixel_values = []
-    target       = []
-    Size         = []
+def _collate_fn_eval(batch):       
+    imgs    = []
+    metas   = []
+    targets = []
     for i,item in enumerate(batch):
-        pixel_values.append(item[0][0].squeeze(0))
-        Size.append(item[0][1])
+        img  = item[0][0]
+        meta = item[0][1]
+        target = item[1]
+        imgs.append(img.squeeze(0))
+        metas.append(meta)
         target_=[]
-        for t in item[1]:
+        for t in target:
             del t['segmentation']
             del t['area']
             del t['iscrowd']
             target_.append(t)
-        target.append(target_)
-    pixel_values = torch.stack(pixel_values)
-    return pixel_values, target, Size
+        targets.append(target_)
+    imgs = torch.stack(imgs)
+    return imgs, targets, metas
 
 
 def _collate_fn_train(batch):             

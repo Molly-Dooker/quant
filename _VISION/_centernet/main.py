@@ -113,16 +113,16 @@ def main(args):
         # Ctdet.model.to(args.device)   
         # Ctdet.run(img)     
 
-
+        img_dir = os.path.join(args.coco_dir,'images', 'val2017')
+        ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         preprocessor = lambda image : Ctdet.pre_process(image, 1.0 ,None)    
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
-
-        for X in dataset : 
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval)#, num_workers=args.num_workers)
+        for X in dataloader:
             break
         ipdb.set_trace()
-        
-        
         return
+
 
         model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
         fold_frozen_bn_to_identity(model)
