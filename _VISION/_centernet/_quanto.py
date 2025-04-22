@@ -55,10 +55,6 @@ def is_match(name, patterns):
                 return True
     return False
 
-
-def quantize_convtranspose2d(m,name):
-    
-
 def _quantize(
     model: torch.nn.Module,
     weights: Optional[Union[str, qtype]] = None,
