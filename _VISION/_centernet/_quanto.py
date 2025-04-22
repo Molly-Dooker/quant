@@ -368,3 +368,8 @@ class QConvTranspose2d(QModuleMixin, torch.nn.ConvTranspose2d):
             self.groups,
             self.dilation,
         )
+
+
+from _centernet import deformconv2d
+from torchvision.ops import deform_conv2d
+

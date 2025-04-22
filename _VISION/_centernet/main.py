@@ -133,8 +133,10 @@ def main(args):
         Ctdet = CenterNet(opt)
         model = Ctdet.model 
         # modify deformconv
-        refacor_deformconv(model)
-        ipdb.set_trace()
+        refacor_deformconv(model) # fold batchnorm while refactoring deformconv (deformconv+bn case)
+        dummy_input = torch.randn(1, 3, 512, 512)
+        model.eval()
+        fold_all_batch_norms(model.base, dummy_input.shape, dummy_input=dummy_input) # fold batchnorm for model.base (conv2d+bn case)
 
 
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
@@ -143,19 +145,20 @@ def main(args):
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
+        if args.vanilla:  eval(model, args.device, dataloader, processor, 'all fold')
 
-        if args.default:  eval(model, args.device, dataloader, processor, 'default3')
-        return
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
-        exclude = []
+        exclude = ['re:^hm.*', 're:^wh.*', 're:^reg.*']
         if args.exclude is not None:
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
-        logger.info(f'exclude : {exclude}')    
-        
+        logger.info(f'exclude : {exclude}')          
+        _quantize(model, weights=weights, activations=activations, exclude=exclude) # nn.Linear, nn.Conv2d + nn.ConvTranspose2d
+        ipdb.set_trace()
 
-        _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
+
+        # 해당 모델에 대해 deformconv 까지 
         if activations is not None:
             with _Calibration(): # custom Calibration
                 calibrate(model, args.device, dataloader)
@@ -203,8 +206,8 @@ if __name__ == '__main__':
     parser.add_argument('--stat', action='store_true', help='Enable stat mode')
     parser.add_argument('--no-stat', dest='stat', action='store_false', help='Disable stat mode')
 
-    parser.add_argument('--default', action='store_true', help='Enable stat mode')
-    parser.add_argument('--no-default', dest='default', action='store_false')
+    parser.add_argument('--vanilla', action='store_true', help='')
+    parser.add_argument('--no-vanilla', dest='default', action='store_false')
 
     parser.add_argument("--size", type=int, default=800)
     parser.add_argument('--exclude', type=str)

@@ -157,15 +157,38 @@ class deformconv2d(nn.Module):
             mask     = mask,
         )
         return output
-      
+   def extra_repr(self):
+      return f"stride={self.stride}, padding={self.padding}, dilation={self.dilation}"
 
 
 class DeformConv2(nn.Module):
     def __init__(self, module):
         super(DeformConv2, self).__init__()
         self.conv_offset_mask = module.conv.conv_offset_mask
+        ########################################### batchnorm folding
         self.deformconv2d = deformconv2d(module.conv)
-        self.bn = module.actf[0]
+        bn = module.actf[0]
+        W = self.deformconv2d.weight  # [out_c, in_c, k, k]
+        b = self.deformconv2d.bias
+        if b is None:
+            b = torch.zeros(W.size(0), device=W.device)
+        gamma = bn.weight       # [out_c]
+        beta  = bn.bias         # [out_c]
+        mu    = bn.running_mean # [out_c]
+        var   = bn.running_var  # [out_c]
+        eps   = bn.eps
+        # 3) scale 계수 α 계산
+        alpha = gamma / torch.sqrt(var + eps)  # [out_c]
+        # 4) folded weight/bias 계산
+        #   - weight는 각 아웃채널마다 α를 곱해줍니다.
+        W_fold = W * alpha.view(-1, 1, 1, 1)
+        b_fold = beta - alpha * mu + alpha * b
+        # 5) deform_conv 모듈에 반영
+        self.deformconv2d.weight.data.copy_(W_fold)
+        self.deformconv2d.bias = torch.nn.Parameter(b_fold)
+        self.bn = torch.nn.Identity()
+        ########################################### batchnorm folding
+
         self.relu = module.actf[1]
         del module
     def forward(self, input):
