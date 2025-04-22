@@ -155,7 +155,7 @@ def main(args):
             if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')          
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # nn.Linear, nn.Conv2d + nn.ConvTranspose2d
-        ipdb.set_trace()
+
 
 
         # 해당 모델에 대해 deformconv 까지 

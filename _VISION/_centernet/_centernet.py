@@ -133,34 +133,27 @@ class DeformConv(nn.Module):
         x = self.conv(x)
         x = self.actf(x)
         return x
-
 class deformconv2d(nn.Module):
     def __init__(self,
-                 m,
-                 stride=1,
-                 padding=1,
-                 dilation=1,
+                 in_channels: int,
+                 out_channels: int,
+                 stride:int,
+                 padding:int,
+                 dilation:int,
+                 bias: bool = True,
                  device: torch.device | None = None,
                  dtype: torch.dtype | None = None):
         super().__init__()
-        # factory_kwargs를 통해 weight/bias 생성(device, dtype)
         factory_kwargs = {"device": device, "dtype": dtype}
-
-        # 원본 m.weight/m.bias를 바로 쓰지 않고, 같은 값을 가지는 새 Parameter로 복사
-        # (이렇게 해야 to() 호출 없이도 생성 시점에 맞춰 device/dtype 적용)
-        self.weight = nn.Parameter(m.weight.to(**factory_kwargs))
-        if m.bias is not None:
-            self.bias = nn.Parameter(m.bias.to(**factory_kwargs))
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels, 3,3).to(**factory_kwargs))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(out_channels).to(**factory_kwargs))
         else:
-            self.bias = None
-
-        # stride/padding/dilation 은 tuple 그대로 저장
+            self.register_parameter('bias', None)
         self.stride   = stride
         self.padding  = padding
         self.dilation = dilation
 
-        # m 내부는 더 이상 필요 없으니 삭제
-        del m
     def forward(self, input, offset, mask):
         # Use torchvision's deform_conv2d
         output = deform_conv2d(
@@ -183,11 +176,15 @@ class DeformConv2(nn.Module):
         super(DeformConv2, self).__init__()
         self.conv_offset_mask = module.conv.conv_offset_mask
         ########################################### batchnorm folding
-        self.deformconv2d = deformconv2d(m=module.conv,
-                                         stride = module.conv.stride,
-                                         padding = module.conv.padding,
-                                         dilation= module.conv.dilation
-                                         )
+        self.deformconv2d = deformconv2d(
+          in_channels = module.conv.weight.shape[1],
+          out_channels = module.conv.weight.shape[0],
+          stride = module.conv.stride,
+          padding = module.conv.padding,
+          dilation= module.conv.dilation)
+        self.deformconv2d.weight.data.copy_(module.conv.weight)
+        if module.conv.bias is not None:
+          self.deformconv2d.bias.data.copy_(module.conv.bias)
         bn = module.actf[0]
         W = self.deformconv2d.weight  # [out_c, in_c, k, k]
         b = self.deformconv2d.bias
