@@ -352,12 +352,12 @@ class DLA(nn.Module):
             y.append(x)
         return y
 
-    def load_pretrained_model(self, data='imagenet', name='dla34', hash='ba72cf86'):
+    def load_pretrained_model(self, data='imagenet', name='dla34', hash='ba72cf86', model_dir = None):
         if name.endswith('.pth'):
             model_weights = torch.load(data + name)
         else:
             model_url = get_model_url(data, name, hash)
-            model_weights = model_zoo.load_url(model_url)
+            model_weights = model_zoo.load_url(url=model_url, model_dir=model_dir)
         num_classes = len(model_weights[list(model_weights.keys())[-1]])
         self.fc = nn.Conv2d(
             self.channels[-1], num_classes,
@@ -367,7 +367,7 @@ class DLA(nn.Module):
 
 
 class DLASeg(nn.Module):
-    def __init__(self, base_name = "dla34", heads = {'hm': 80, 'wh': 2, 'reg': 2}, pretrained = True, down_ratio = 4, final_kernel =1,
+    def __init__(self, base_name = "dla34", heads = {'hm': 80, 'wh': 2, 'reg': 2}, weightpath=None ,pretrained = True, down_ratio = 4, final_kernel =1,
                  last_level = 5 , head_conv = 256, out_channel=0):
         super(DLASeg, self).__init__()
         assert down_ratio in [2, 4, 8, 16]
@@ -376,7 +376,7 @@ class DLASeg(nn.Module):
         self.base = DLA([1, 1, 1, 2, 2, 1],
                 [16, 32, 64, 128, 256, 512],
                 block=BasicBlock)
-        self.base.load_pretrained_model(data='imagenet', name='dla34', hash='ba72cf86')
+        self.base.load_pretrained_model(data='imagenet', name='dla34', hash='ba72cf86', model_dir = weightpath)
         channels = self.base.channels
         scales = [2 ** i for i in range(len(channels[self.first_level:]))]
         self.dla_up = DLAUp(self.first_level, channels[self.first_level:], scales)
@@ -490,9 +490,8 @@ class CenterNet(nn.Module):
     print("opt: ", opt)
     self.mean  = opt.mean
     self.std   = opt.std
-    self.model = DLASeg(pretrained=True)
-
-    self.model = load_model(self.model, self.weight_path)
+    self.model = DLASeg(pretrained=True, weightpath = os.path.dirname(self.weight_path)) # base weight 로드함. 이 weight 는 torch model zoo 에서 받아옴
+    self.model = load_model(self.model, self.weight_path) # 나머지 weight 로드함. 이 weight 는 사전에 받아놓은 weight
     # self.model = self.model.to(device)
     self.model.eval()
     self.mean = np.array(self.mean, dtype=np.float32).reshape(1, 1, 3)
