@@ -15,6 +15,11 @@ from optimum.quanto.calibrate import _updated_scale
 import types
 import re
 import ipdb
+
+from _centernet import deformconv2d
+from torchvision.ops import deform_conv2d
+
+
 def _quantize_input(module: torch.nn.Module, input: torch.Tensor) -> torch.Tensor:
     input = input[0]
     if isinstance(input, ActivationQBytesTensor):
@@ -120,6 +125,10 @@ def _quantize(
             for name, param in m.named_parameters():
                 setattr(m, name, None)
                 del param
+        # if isinstance(m,deformconv2d):
+        #     ipdb.set_trace
+        #     qmodule = Qdeformconv2d.from_module(m, weights=weights, activations=activations, optimizer=optimizer) 
+        
 
     # 전체적으로  output quantizer 제거
     # conv2d 는 input quantizer 붙임
@@ -370,6 +379,44 @@ class QConvTranspose2d(QModuleMixin, torch.nn.ConvTranspose2d):
         )
 
 
-from _centernet import deformconv2d
-from torchvision.ops import deform_conv2d
+
+
+
+
+class Qdeformconv2d(QModuleMixin, deformconv2d):
+    @classmethod
+    def qcreate(
+        cls,
+        module,
+        weights: qtype,
+        activations: Optional[qtype] = None,
+        optimizer: Optional[Optimizer] = None,
+        device: Optional[torch.device] = None,
+    ):
+        return cls(  
+            stride = module.stride,
+            padding = module.padding,
+            dilation = module.dilation,
+            bias=module.bias is not None,            
+            dtype=module.weight.dtype,
+            device=device,
+            weights=weights,
+            activations=activations,
+            optimizer=optimizer,
+            quantize_input=True,
+        )
+
+    def forward(self, input, offset, mask):
+        # Use torchvision's deform_conv2d
+        output = deform_conv2d(
+            input    = input,
+            offset   = offset,
+            weight   = self.qweight,
+            bias     = self.bias,
+            stride   = self.stride,
+            padding  = self.padding,
+            dilation = self.dilation,
+            mask     = mask,
+        )
+        return output
 

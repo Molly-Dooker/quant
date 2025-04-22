@@ -49,7 +49,7 @@ def eval(model, device, dataloader, processor, prefix=''):
         gt_path = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         cocoGt = COCO(gt_path)        
         model.to(device)
-        model.eval()       
+        model.eval()    
         all_results = []
         all_targets = []
         with torch.no_grad():
@@ -145,8 +145,8 @@ def main(args):
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
-        if args.vanilla:  eval(model, args.device, dataloader, processor, 'all fold')
-
+        if args.vanilla:  eval(model, args.device, dataloader, processor, 'all fold2')
+        return
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = ['re:^hm.*', 're:^wh.*', 're:^reg.*']
