@@ -95,10 +95,22 @@ def eval(model, device, dataloader, processor, prefix=''):
         cocoEval.evaluate()
         cocoEval.accumulate()
         cocoEval.summarize()
-        mAP5095 = cocoEval.stats[0].item() 
-        mAP50 = cocoEval.stats[1].item()
-        ipdb.set_trace()
-        logger.info(f'{prefix} mAP50:{mAP50 : .5f}, mAP50-95 : {mAP5095:.5f}')
+
+        result = {'mAP50:95':f'{cocoEval.stats[0].item():.5f}',
+                  'mAP50':f'{cocoEval.stats[1].item():.5f}',
+                  'mAP75':f'{cocoEval.stats[2].item():.5f}',
+                  'mAP50:95-s':f'{cocoEval.stats[3].item():.5f}',
+                  'mAP50:95-m':f'{cocoEval.stats[4].item():.5f}',
+                  'mAP50:95-l':f'{cocoEval.stats[5].item():.5f}',
+                  'mAR50:95-1':f'{cocoEval.stats[6].item():.5f}',
+                  'mAR50:95-10':f'{cocoEval.stats[7].item():.5f}',
+                  'mAR50:95-100':f'{cocoEval.stats[8].item():.5f}',
+                  'mAR50:95-s':f'{cocoEval.stats[9].item():.5f}',
+                  'mAR50:95-m':f'{cocoEval.stats[10].item():.5f}',
+                  'mAR50:95-l':f'{cocoEval.stats[11].item():.5f}',                  
+                  }
+        for key, value in result.items():
+            logger.info(f'{prefix} {key:12} : {value}')
 
 
 def calibrate(model, device, dataloader, num=10000):
