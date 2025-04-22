@@ -30,7 +30,7 @@ from optimum.quanto import (
 )
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-
+from aimet_torch.batch_norm_fold import fold_all_batch_norms
 from _centernet import CenterNet, Config, DeformConv, DeformConv2
 from utils.functions import ctdet_decode
 
@@ -123,8 +123,6 @@ def calibrate(model, device, dataloader, num=10000):
 
 
 
-
-from aimet_torch.batch_norm_fold import fold_all_batch_norms
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval

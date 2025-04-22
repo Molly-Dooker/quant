@@ -124,9 +124,7 @@ def _quantize(
             for name, param in m.named_parameters():
                 setattr(m, name, None)
                 del param
-        # if isinstance(m,deformconv2d):
-        #     ipdb.set_trace()
-        #     qmodule = Qdeformconv2d.from_module(m, weights=weights, activations=activations, optimizer=optimizer) 
+
         
 
     # 전체적으로  output quantizer 제거
