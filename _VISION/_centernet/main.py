@@ -137,11 +137,12 @@ def main(args):
         for name, m in model.named_modules():
             if not isinstance(m,DeformConv): continue
             m2 =  DeformConv2(m)
-            set_module_by_name(model,name,m2)              
-        # base_model = model.base
-        # dummy_input = torch.randn(1, 3, 512, 512)
-        # fold_all_batch_norms(base_model, dummy_input.shape, dummy_input=dummy_input)
-        # model.base = base_model
+            set_module_by_name(model,name,m2)
+            m2.name = name
+            for name, param in m.named_parameters():
+                setattr(m, name, None)
+                del param 
+
 
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
@@ -149,9 +150,9 @@ def main(args):
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
-        ipdb.set_trace()
-        if args.default:  eval(model, args.device, dataloader, processor, 'default2')
 
+        if args.default:  eval(model, args.device, dataloader, processor, 'default3')
+        return
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = []

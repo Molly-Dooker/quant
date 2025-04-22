@@ -134,17 +134,47 @@ class DeformConv(nn.Module):
         x = self.actf(x)
         return x
 
+
+class deformconv2d(nn.Module):
+   def __init__(self, m):
+      super(deformconv2d,self).__init__()
+      self.weight   = m.weight
+      self.bias     = m.bias
+      self.stride   = m.func.stride
+      self.padding  = m.func.padding
+      self.dilation = m.func.dilation    
+      del m
+   def forward(self, input, offset, mask):
+        # Use torchvision's deform_conv2d
+        output = deform_conv2d(
+            input    = input,
+            offset   = offset,
+            weight   = self.weight,
+            bias     = self.bias,
+            stride   = self.stride,
+            padding  = self.padding,
+            dilation = self.dilation,
+            mask     = mask,
+        )
+        return output
+      
+
+
 class DeformConv2(nn.Module):
     def __init__(self, module):
         super(DeformConv2, self).__init__()
-        self.conv_ = module.conv
+        self.conv_offset_mask = module.conv.conv_offset_mask
+        self.deformconv2d = deformconv2d(module.conv)
         self.bn = module.actf[0]
         self.relu = module.actf[1]
-        # self.bn = nn.BatchNorm2d(cho, momentum=BN_MOMENTUM)
-        # self.relu = nn.ReLU(inplace=True)
-    def forward(self, x):
-        x = self.conv_(x)
-        x = self.bn(x)
+        del module
+    def forward(self, input):
+        out = self.conv_offset_mask(input)
+        o1, o2, mask = torch.chunk(out, 3, dim=1)
+        offset = torch.cat((o1, o2), dim=1)
+        mask = torch.sigmoid(mask)
+        result = self.deformconv2d(input, offset, mask)        
+        x = self.bn(result)
         x = self.relu(x)
         return x
 
