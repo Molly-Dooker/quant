@@ -106,6 +106,7 @@ class DCN(DCNv2):
                                           padding=(self.padding, self.padding),
                                           bias=True)
         self.init_offset()
+        self.func = DCNv2Function(self.stride, self.padding, self.dilation, self.deformable_groups)
 
     def init_offset(self):
         self.conv_offset_mask.weight.data.zero_()
@@ -116,8 +117,8 @@ class DCN(DCNv2):
         o1, o2, mask = torch.chunk(out, 3, dim=1)
         offset = torch.cat((o1, o2), dim=1)
         mask = torch.sigmoid(mask)
-        func = DCNv2Function(self.stride, self.padding, self.dilation, self.deformable_groups)
-        return func(input, offset, mask, self.weight, self.bias)
+        result = self.func(input, offset, mask, self.weight, self.bias)
+        return result
 
 
 class DeformConv(nn.Module):
@@ -411,13 +412,14 @@ class DLASeg(nn.Module):
             self.__setattr__(head, fc)
 
     def forward(self, x):
-        #  
         x = self.base(x)
         x = self.dla_up(x)
-        y = []
-        for i in range(self.last_level - self.first_level):
-            y.append(x[i].clone())
-        self.ida_up(y, 0, len(y))
+        # y = []
+        # for i in range(self.last_level - self.first_level): # last_level = 5, first_level = 2
+        #     y.append(x[i].clone())
+        y = x[:3]
+        # self.ida_up(y, 0, len(y))
+        self.ida_up(y,0,3)
         z = {}
         for head in self.heads:
             z[head] = self.__getattr__(head)(y[-1])
@@ -600,7 +602,6 @@ class CenterNet(nn.Module):
     for j in range(1, self.num_classes + 1):
       for bbox in results[j]:
         if bbox[4] > self.opt.vis_thresh:
-          ipdb.set_trace()
           debugger.add_coco_bbox(bbox[:4], j - 1, bbox[4], img_id='ctdet')
     debugger.save_img(imgId='ctdet', path='./')
 

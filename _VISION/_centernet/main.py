@@ -122,53 +122,43 @@ def calibrate(model, device, dataloader, num=10000):
             _ = model(batch[0].to(device))               
 
 
+
+
+from aimet_torch.batch_norm_fold import fold_all_batch_norms
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
     if not EVAL:
         opt = Config(load_model='_model/ctdet_coco_dla_2x.pth', device=args.device)       
         Ctdet = CenterNet(opt)
-        # img = cv2.imread("im1.jpg")
-        # Ctdet.model.eval()
-        # Ctdet.model.to(args.device)
-        # Ctdet.run(img)     
-        # return
+        model = Ctdet.model 
+
+        # base
+        # dla_up
+        # ida_up      
+
+
+        # base_model = model.base
+        # dummy_input = torch.randn(1, 3, 512, 512)
+        # fold_all_batch_norms(base_model, dummy_input.shape, dummy_input=dummy_input)
+        # model.base = base_model
+
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         preprocessor = lambda image : Ctdet.pre_process(image, 1.0 ,None)    
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
-
-        model = Ctdet.model
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
-        eval(model, args.device, dataloader, processor, 'default')
 
-        return
-                
-
-
-
-        
-
-
-        model = DetrForObjectDetection.from_pretrained(args.model_name, revision="no_timm")
-        fold_frozen_bn_to_identity(model)
-        processor = DetrImageProcessor().from_pretrained(args.model_name, revision="no_timm", size={"height": args.size, "width": args.size})
-
-        img_dir = os.path.join(args.coco_dir,'images', 'val2017')
-        ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
-        dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, processor))
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
-        # base model evaluation
-        if args.default: eval(model, args.device, dataloader, processor, 'default')
+        if args.default:  eval(model, args.device, dataloader, processor, 'default')
 
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
-        exclude = ['class_labels_classifier', 're:^bbox_predictor.*', 're:^model.backbone.conv_encoder.model.encoder.stages.0.layers.0.*', 're:^model.encoder.layers.2.self_attn.*', 're:^model.encoder.layers.5.self_attn.*']
+        exclude = []
         if args.exclude is not None:
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
-        logger.info(f'exclude : {exclude}')        
+        logger.info(f'exclude : {exclude}')      
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
         if activations is not None:
             with _Calibration(): # custom Calibration

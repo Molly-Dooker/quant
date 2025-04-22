@@ -1,10 +1,10 @@
-from fnmatch import fnmatch
+
 from typing import Any, Dict, List, Optional, Union
-import ipdb
 import torch
+from torch.nn import functional as F, init
 from optimum.quanto.nn import QModuleMixin, quantize_module
 from optimum.quanto.tensor import Optimizer, qtype
-from optimum.quanto.quantize import _quantize_submodule
+from optimum.quanto.quantize import _quantize_submodule, set_module_by_name
 from optimum.quanto.nn import QLinear, QConv2d
 from optimum.quanto.tensor.activations import ActivationQBytesTensor, quantize_activation
 from typing import Optional
@@ -14,6 +14,7 @@ from optimum.quanto import absmax_scale, QTensor
 from optimum.quanto.calibrate import _updated_scale
 import types
 import re
+import ipdb
 def _quantize_input(module: torch.nn.Module, input: torch.Tensor) -> torch.Tensor:
     input = input[0]
     if isinstance(input, ActivationQBytesTensor):
@@ -53,6 +54,10 @@ def is_match(name, patterns):
             if pattern==name:
                 return True
     return False
+
+
+def quantize_convtranspose2d(m,name):
+    
 
 def _quantize(
     model: torch.nn.Module,
@@ -97,12 +102,31 @@ def _quantize(
         if include is not None:
             if is_match(name,include):
                 _quantize_submodule(model, name, m, weights=weights, activations=activations, optimizer=optimizer)
+                # convtransepose2d 케이스 추가
+                if isinstance(m,torch.nn.ConvTranspose2d):
+                    qmodule = QConvTranspose2d.from_module(m, weights=weights, activations=activations, optimizer=optimizer)            
+                    set_module_by_name(model, name, qmodule)
+                    qmodule.name = name
+                    for name, param in m.named_parameters():
+                        setattr(m, name, None)
+                        del param
             continue
 
         if isinstance(m,torch.nn.LayerNorm): continue
         if is_match(name,exclude): continue
         _quantize_submodule(model, name, m, weights=weights, activations=activations, optimizer=optimizer)
 
+        # convtransepose2d 케이스 추가
+        if isinstance(m,torch.nn.ConvTranspose2d):
+            qmodule = QConvTranspose2d.from_module(m, weights=weights, activations=activations, optimizer=optimizer)            
+            set_module_by_name(model, name, qmodule)
+            qmodule.name = name
+            for name, param in m.named_parameters():
+                setattr(m, name, None)
+                del param
+
+    # 전체적으로  output quantizer 제거
+    # conv2d 는 input quantizer 붙임
     for name, m in model.named_modules():
         if not isinstance(m,QModuleMixin): continue
         m.disable_output_quantization()
@@ -286,3 +310,65 @@ def _requantize(
     model.to(device)
     # Load the quantized model weights
     model.load_state_dict(state_dict, strict=False)
+
+
+
+
+class QConvTranspose2d(QModuleMixin, torch.nn.ConvTranspose2d):
+    @classmethod
+    def qcreate(
+        cls,
+        module,
+        weights: qtype,
+        activations: Optional[qtype] = None,
+        optimizer: Optional[Optimizer] = None,
+        device: Optional[torch.device] = None,
+    ):
+        return cls(
+            in_channels=module.in_channels,
+            out_channels=module.out_channels,
+            kernel_size=module.kernel_size,
+            stride=module.stride,
+            padding=module.padding,
+            dilation=module.dilation,
+            groups=module.groups,
+            bias=module.bias is not None,
+            padding_mode=module.padding_mode,
+            dtype=module.weight.dtype,
+            device=device,
+            weights=weights,
+            activations=activations,
+            optimizer=optimizer,
+            quantize_input=True,
+        )
+
+    def forward(self, input: torch.Tensor, output_size: Optional[List[int]] = None) -> torch.Tensor:
+        if self.padding_mode != "zeros":
+            raise ValueError(
+                "Only `zeros` padding mode is supported for ConvTranspose2d"
+            )
+
+        assert isinstance(self.padding, tuple)
+        # One cannot replace List by Tuple or Sequence in "_output_padding" because
+        # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
+        num_spatial_dims = 2
+        output_padding = self._output_padding(
+            input,
+            output_size,
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
+            self.kernel_size,  # type: ignore[arg-type]
+            num_spatial_dims,
+            self.dilation,  # type: ignore[arg-type]
+        )
+
+        return F.conv_transpose2d(
+            input,
+            self.qweight,
+            self.bias,
+            self.stride,
+            self.padding,
+            output_padding,
+            self.groups,
+            self.dilation,
+        )
