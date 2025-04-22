@@ -123,16 +123,31 @@ class DCN(DCNv2):
 
 class DeformConv(nn.Module):
     def __init__(self, chi, cho):
-        super(DeformConv, self).__init__()
-        self.conv = DCN(chi, cho, kernel_size=(3,3), stride=1, padding=1, dilation=1, deformable_groups=1)
+        super(DeformConv, self).__init__()        
         self.actf = nn.Sequential(
             nn.BatchNorm2d(cho, momentum=BN_MOMENTUM),
             nn.ReLU(inplace=True)
         )
+        self.conv = DCN(chi, cho, kernel_size=(3,3), stride=1, padding=1, dilation=1, deformable_groups=1)
     def forward(self, x):
         x = self.conv(x)
         x = self.actf(x)
         return x
+
+class DeformConv2(nn.Module):
+    def __init__(self, module):
+        super(DeformConv2, self).__init__()
+        self.conv_ = module.conv
+        self.bn = module.actf[0]
+        self.relu = module.actf[1]
+        # self.bn = nn.BatchNorm2d(cho, momentum=BN_MOMENTUM)
+        # self.relu = nn.ReLU(inplace=True)
+    def forward(self, x):
+        x = self.conv_(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
+
 
 
 class IDAUp(nn.Module):

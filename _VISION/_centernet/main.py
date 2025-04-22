@@ -26,12 +26,13 @@ from optimum.quanto import (
     quantization_map,
     quantize,
     requantize,
-    quantize_activation
+    quantize_activation,    
 )
+from optimum.quanto.quantize import set_module_by_name
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from _centernet import CenterNet, Config
+from _centernet import CenterNet, Config, DeformConv, DeformConv2
 from utils.functions import ctdet_decode
 
 def logger_enable(prefix=''):
@@ -132,12 +133,11 @@ def main(args):
         opt = Config(load_model='_model/ctdet_coco_dla_2x.pth', device=args.device)       
         Ctdet = CenterNet(opt)
         model = Ctdet.model 
-
-        # base
-        # dla_up
-        # ida_up      
-
-
+        # modify deformconv
+        for name, m in model.named_modules():
+            if not isinstance(m,DeformConv): continue
+            m2 =  DeformConv2(m)
+            set_module_by_name(model,name,m2)              
         # base_model = model.base
         # dummy_input = torch.randn(1, 3, 512, 512)
         # fold_all_batch_norms(base_model, dummy_input.shape, dummy_input=dummy_input)
@@ -149,8 +149,8 @@ def main(args):
         dataset = CocoDetection(root=img_dir, annFile=ann_file, transforms=lambda img, target : eval_transform(img, target, preprocessor))
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
-
-        if args.default:  eval(model, args.device, dataloader, processor, 'default')
+        ipdb.set_trace()
+        if args.default:  eval(model, args.device, dataloader, processor, 'default2')
 
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
@@ -159,7 +159,8 @@ def main(args):
             exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
             if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')    
-        ipdb.set_trace()  
+        
+
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # custom quantize
         if activations is not None:
             with _Calibration(): # custom Calibration
