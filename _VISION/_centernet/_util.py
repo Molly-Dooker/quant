@@ -16,8 +16,28 @@ from utils.functions import ctdet_decode
 import cv2
 import sys
 from PIL import Image
-from _centernet import CenterNet, Config, DeformConv, DeformConv2
+from _centernet import CenterNet, Config, DeformConv, DeformConv2, deformconv2d
 from optimum.quanto.quantize import set_module_by_name
+from typing import Any, Dict, List, Optional, Union
+import torch
+from torch.nn import functional as F, init
+from optimum.quanto.nn import QModuleMixin, quantize_module
+from optimum.quanto.tensor import Optimizer, qtype
+from optimum.quanto.quantize import _quantize_submodule, set_module_by_name
+from optimum.quanto.nn import QLinear, QConv2d
+from optimum.quanto.tensor.activations import ActivationQBytesTensor, quantize_activation
+from typing import Optional
+from torch.nn.modules.module import  register_module_forward_hook, register_module_forward_pre_hook
+from torch.overrides import TorchFunctionMode
+from optimum.quanto import absmax_scale, QTensor
+from optimum.quanto.calibrate import _updated_scale
+import types
+import re
+import ipdb
+from torchvision.ops import deform_conv2d
+
+
+
 label2id = {
     'N/A': 83,
     'airplane': 5,
@@ -342,3 +362,134 @@ def refacor_deformconv(model):
         for name, param in m.named_parameters():
             setattr(m, name, None)
             del param 
+            
+            
+def is_match(name, patterns):
+    for pattern in patterns:
+        if pattern.startswith('re:'):
+            regex = pattern[3:]
+            if re.match(regex, name): 
+                return True
+        else:
+            if pattern==name:
+                return True
+    return False      
+            
+def _quantize_deformconv(
+    model: torch.nn.Module,
+    weights: Optional[Union[str, qtype]] = None,
+    activations: Optional[Union[str, qtype]] = None,
+    optimizer: Optional[Optimizer] = None,
+    include: Optional[Union[str, List[str]]] = None,
+    exclude: Optional[Union[str, List[str]]] = None,
+):
+    if include is not None:
+        include = [include] if isinstance(include, str) else include
+    if exclude is not None:
+        exclude = [exclude] if isinstance(exclude, str) else exclude
+
+    for name, m in model.named_modules():
+        if include is not None:
+            if is_match(name,include):
+                if isinstance(m, deformconv2d):
+                    qmodule = Qdeformconv2d.from_module(m, weights=weights, activations=activations, optimizer=optimizer)            
+                    set_module_by_name(model, name, qmodule)
+                    qmodule.name = name
+                    for name, param in m.named_parameters():
+                        setattr(m, name, None)
+                        del param
+            continue
+        if is_match(name,exclude): continue
+
+
+        # convtransepose2d 케이스 추가
+        if isinstance(m, deformconv2d):
+            qmodule = Qdeformconv2d.from_module(m, weights=weights, activations=activations, optimizer=optimizer)            
+            set_module_by_name(model, name, qmodule)
+            qmodule.name = name
+            for name, param in m.named_parameters():
+                setattr(m, name, None)
+                del param
+
+
+    # 전체적으로  output quantizer 제거
+    # conv2d 는 input quantizer 붙임
+    for name, m in model.named_modules():
+        # if not isinstance(m,QModuleMixin): continue
+        if not isinstance(m,Qdeformconv2d): continue
+        m._quantize_hooks["input"].remove()
+        m.disable_output_quantization()
+        m._quantize_hooks.pop("output", None)
+        m._quantize_hooks.pop("input", None)
+        del m._buffers["output_scale"]     
+        m._quantize_hooks["input"] = m.register_forward_pre_hook(quantize_input)
+        m._save_to_state_dict = types.MethodType(_save_to_state_dict, m)
+
+
+def quantize_input(module, input_):
+    input, offset, mask = input_
+    if isinstance(input, ActivationQBytesTensor):
+        if input.qtype != module.activation_qtype:
+            raise ValueError(
+                "Models with heterogeneous quantized activations are not supported:"
+                f" expectedmodule{M.activation_qtype.name} input but got {input.qtype.name} instead."
+            )
+    else:
+        input = quantize_activation(input, qtype=module.activation_qtype, scale=module.input_scale)
+    return input, offset, mask
+        
+def _save_to_state_dict(self, destination, prefix, keep_vars):
+    if self.weight_qtype is None or not self.frozen:
+        # Save standard weight Tensor
+        destination[prefix + "weight"] = (
+            self.weight if (self.weight is None or keep_vars) else self.weight.detach()
+        )
+    else:
+        # Save QTensor using dedicated method
+        self.weight.save_to_state_dict(destination, prefix + "weight.", keep_vars)
+    if self.bias is not None:
+        destination[prefix + "bias"] = self.bias if keep_vars else self.bias.detach()
+    destination[prefix + "input_scale"] = self.input_scale if keep_vars else self.input_scale.detach()
+    # destination[prefix + "output_scale"] = self.output_scale if keep_vars else self.output_scale.detach()
+    
+
+
+    
+class Qdeformconv2d(QModuleMixin, deformconv2d):
+    @classmethod
+    def qcreate(
+        cls,
+        module,
+        weights: qtype,
+        activations: Optional[qtype] = None,
+        optimizer: Optional[Optimizer] = None,
+        device: Optional[torch.device] = None,
+    ):
+        return cls(
+            in_channels=module.in_channels,
+            out_channels=module.out_channels,
+            stride=module.stride,
+            padding=module.padding,
+            dilation=module.dilation,
+            bias=module.bias is not None,
+            dtype=module.weight.dtype,
+            device=device,
+            weights=weights,
+            activations=activations,
+            optimizer=optimizer,
+            quantize_input=True,
+        )
+
+    def forward(self, input, offset, mask):    
+        # Use torchvision's deform_conv2d
+        output = deform_conv2d(
+            input    = input,
+            offset   = offset,
+            weight   = self.qweight,
+            bias     = self.bias,
+            stride   = self.stride,
+            padding  = self.padding,
+            dilation = self.dilation,
+            mask     = mask
+        )
+        return output

@@ -16,8 +16,7 @@ import types
 import re
 import ipdb
 
-from _centernet import deformconv2d
-from torchvision.ops import deform_conv2d
+
 
 
 def _quantize_input(module: torch.nn.Module, input: torch.Tensor) -> torch.Tensor:
@@ -126,7 +125,7 @@ def _quantize(
                 setattr(m, name, None)
                 del param
         # if isinstance(m,deformconv2d):
-        #     ipdb.set_trace
+        #     ipdb.set_trace()
         #     qmodule = Qdeformconv2d.from_module(m, weights=weights, activations=activations, optimizer=optimizer) 
         
 
@@ -196,13 +195,13 @@ class _Calibration(TorchFunctionMode):
             for handle in self.streamline_hooks.values():
                 handle.remove()
 
-    def calibrate_input(self, module: torch.nn.Module, input, momentum: float = 0.9):
+    def calibrate_input(self, module: torch.nn.Module, input_, momentum: float = 0.9):
         """Calibrate a module input scale
 
         This is registered as a global hook that is called before any module forward pre hook.
         """
         if isinstance(module, QModuleMixin) and module.activation_qtype is not None:
-            input = input[0]
+            input = input_[0]
             if isinstance(input, ActivationQBytesTensor):
                 # Just adopt the maximum scale of the input
                 module.input_scale = torch.max(input._scale)
@@ -213,7 +212,10 @@ class _Calibration(TorchFunctionMode):
             if self.streamline and module not in self.streamline_hooks:
                 # Add a hook to tag the module outputs (after the module quantization hook in QModuleMixin)
                 self.streamline_hooks[module] = module.register_forward_hook(self.tag_outputs)
-            return input
+            if len(input_)==1:
+                return input
+            else:
+                return input_
 
     def calibrate_output(
         self,
@@ -383,40 +385,5 @@ class QConvTranspose2d(QModuleMixin, torch.nn.ConvTranspose2d):
 
 
 
-class Qdeformconv2d(QModuleMixin, deformconv2d):
-    @classmethod
-    def qcreate(
-        cls,
-        module,
-        weights: qtype,
-        activations: Optional[qtype] = None,
-        optimizer: Optional[Optimizer] = None,
-        device: Optional[torch.device] = None,
-    ):
-        return cls(  
-            stride = module.stride,
-            padding = module.padding,
-            dilation = module.dilation,
-            bias=module.bias is not None,            
-            dtype=module.weight.dtype,
-            device=device,
-            weights=weights,
-            activations=activations,
-            optimizer=optimizer,
-            quantize_input=True,
-        )
 
-    def forward(self, input, offset, mask):
-        # Use torchvision's deform_conv2d
-        output = deform_conv2d(
-            input    = input,
-            offset   = offset,
-            weight   = self.qweight,
-            bias     = self.bias,
-            stride   = self.stride,
-            padding  = self.padding,
-            dilation = self.dilation,
-            mask     = mask,
-        )
-        return output
 

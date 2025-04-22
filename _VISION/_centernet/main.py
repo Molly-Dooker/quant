@@ -13,7 +13,7 @@ from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
 from transformers import DetrImageProcessor, DetrForObjectDetection
 from tqdm import tqdm
-from _util import fold_frozen_bn_to_identity, eval_transform, _collate_fn_eval, keyword_to_itype, _postprocessor, refacor_deformconv
+from _util import eval_transform, _collate_fn_eval, keyword_to_itype, _postprocessor, refacor_deformconv, _quantize_deformconv
 from _quanto import _quantize, _Calibration, _requantize
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
@@ -146,7 +146,7 @@ def main(args):
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
         if args.vanilla:  eval(model, args.device, dataloader, processor, 'all fold2')
-        return
+
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = ['re:^hm.*', 're:^wh.*', 're:^reg.*']
@@ -155,7 +155,7 @@ def main(args):
             if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')          
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # nn.Linear, nn.Conv2d + nn.ConvTranspose2d
-
+        _quantize_deformconv(model, weights=weights, activations=activations, exclude=exclude) # deformconv
 
 
         # 해당 모델에 대해 deformconv 까지 

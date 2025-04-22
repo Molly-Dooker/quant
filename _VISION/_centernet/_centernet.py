@@ -150,9 +150,11 @@ class deformconv2d(nn.Module):
             self.bias = nn.Parameter(torch.empty(out_channels).to(**factory_kwargs))
         else:
             self.register_parameter('bias', None)
-        self.stride   = stride
-        self.padding  = padding
-        self.dilation = dilation
+        self.in_channels  = in_channels
+        self.out_channels = out_channels
+        self.stride       = stride
+        self.padding      = padding
+        self.dilation     = dilation
 
     def forward(self, input, offset, mask):
         # Use torchvision's deform_conv2d
