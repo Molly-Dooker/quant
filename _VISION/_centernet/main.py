@@ -13,7 +13,7 @@ from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
 from transformers import DetrImageProcessor, DetrForObjectDetection
 from tqdm import tqdm
-from _util import fold_frozen_bn_to_identity, eval_transform, _collate_fn_eval, keyword_to_itype, _postprocessor
+from _util import fold_frozen_bn_to_identity, eval_transform, _collate_fn_eval, keyword_to_itype, _postprocessor, refacor_deformconv
 from _quanto import _quantize, _Calibration, _requantize
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
@@ -28,7 +28,6 @@ from optimum.quanto import (
     requantize,
     quantize_activation,    
 )
-from optimum.quanto.quantize import set_module_by_name
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -134,14 +133,8 @@ def main(args):
         Ctdet = CenterNet(opt)
         model = Ctdet.model 
         # modify deformconv
-        for name, m in model.named_modules():
-            if not isinstance(m,DeformConv): continue
-            m2 =  DeformConv2(m)
-            set_module_by_name(model,name,m2)
-            m2.name = name
-            for name, param in m.named_parameters():
-                setattr(m, name, None)
-                del param 
+        refacor_deformconv(model)
+        ipdb.set_trace()
 
 
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')

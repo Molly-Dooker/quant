@@ -16,7 +16,8 @@ from utils.functions import ctdet_decode
 import cv2
 import sys
 from PIL import Image
-
+from _centernet import CenterNet, Config, DeformConv, DeformConv2
+from optimum.quanto.quantize import set_module_by_name
 label2id = {
     'N/A': 83,
     'airplane': 5,
@@ -331,3 +332,13 @@ def fold_frozen_bn_to_identity(model: nn.Module):
     """
     recursive_fold(model)
 
+
+def refacor_deformconv(model):
+    for name, m in model.named_modules():
+        if not isinstance(m,DeformConv): continue
+        m2 =  DeformConv2(m)
+        set_module_by_name(model,name,m2)
+        m2.name = name
+        for name, param in m.named_parameters():
+            setattr(m, name, None)
+            del param 
