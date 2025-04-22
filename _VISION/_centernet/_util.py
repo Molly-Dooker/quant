@@ -11,6 +11,139 @@ import torch
 import torch.nn as nn
 import cv2
 import numpy as np
+from _centernet import Config, CenterNet
+from utils.functions import ctdet_decode
+import cv2
+import sys
+from PIL import Image
+
+label2id = {
+    'N/A': 83,
+    'airplane': 5,
+    'apple': 53,
+    'backpack': 27,
+    'banana': 52,
+    'baseball bat': 39,
+    'baseball glove': 40,
+    'bear': 23,
+    'bed': 65,
+    'bench': 15,
+    'bicycle': 2,
+    'bird': 16,
+    'boat': 9,
+    'book': 84,
+    'bottle': 44,
+    'bowl': 51,
+    'broccoli': 56,
+    'bus': 6,
+    'cake': 61,
+    'car': 3,
+    'carrot': 57,
+    'cat': 17,
+    'cell phone': 77,
+    'chair': 62,
+    'clock': 85,
+    'couch': 63,
+    'cow': 21,
+    'cup': 47,
+    'dining table': 67,
+    'dog': 18,
+    'donut': 60,
+    'elephant': 22,
+    'fire hydrant': 11,
+    'fork': 48,
+    'frisbee': 34,
+    'giraffe': 25,
+    'hair drier': 89,
+    'handbag': 31,
+    'horse': 19,
+    'hot dog': 58,
+    'keyboard': 76,
+    'kite': 38,
+    'knife': 49,
+    'laptop': 73,
+    'microwave': 78,
+    'motorcycle': 4,
+    'mouse': 74,
+    'orange': 55,
+    'oven': 79,
+    'parking meter': 14,
+    'person': 1,
+    'pizza': 59,
+    'potted plant': 64,
+    'refrigerator': 82,
+    'remote': 75,
+    'sandwich': 54,
+    'scissors': 87,
+    'sheep': 20,
+    'sink': 81,
+    'skateboard': 41,
+    'skis': 35,
+    'snowboard': 36,
+    'spoon': 50,
+    'sports ball': 37,
+    'stop sign': 13,
+    'suitcase': 33,
+    'surfboard': 42,
+    'teddy bear': 88,
+    'tennis racket': 43,
+    'tie': 32,
+    'toaster': 80,
+    'toilet': 70,
+    'toothbrush': 90,
+    'traffic light': 10,
+    'train': 7,
+    'truck': 8,
+    'tv': 72,
+    'umbrella': 28,
+    'vase': 86,
+    'wine glass': 46,
+    'zebra': 24
+}
+
+
+coco_class_name = [
+     'person', 'bicycle', 'car', 'motorcycle', 'airplane',
+     'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant',
+     'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse',
+     'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
+     'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis',
+     'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove',
+     'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass',
+     'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich',
+     'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
+     'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv',
+     'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
+     'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
+     'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+]
+
+def _postprocessor(hm,wh,reg,metas, cat_spec_wh, K, scale, post0, post1, post2):
+    dets = post0(hm, wh, reg=reg, cat_spec_wh=cat_spec_wh, K=K) #ctdet_decode
+    results = []
+    for det, meta in zip(dets, metas):
+        # 배치당 
+        scores = []; boxes =[]; labels=[];
+        det = det.unsqueeze(0)
+        det1 = post1(det, meta, scale) #Ctdet.post_process
+        det2 = post2(det1)
+        for cls in range(1,81): # coco 80 class 
+            if det2[cls].shape[0]==0: continue
+            box = det2[cls][:,:4] #xyxy 방식
+            score = det2[cls][:,-1]
+            label = label2id[coco_class_name[cls-1]]
+            label = torch.tensor([label]*box.shape[0])
+            scores.append(score)
+            boxes.append(box)
+            labels.append(label)
+        boxes = torch.tensor(np.vstack(boxes))
+        scores = torch.tensor(np.concat(scores))
+        labels = torch.tensor(np.concat(labels))
+        result = {'scores':scores, 'labels':labels, 'boxes':boxes}
+        results.append(result)
+    return results    
+
+
 def keyword_to_itype(k):
     return {"none": None, "int4": qint4, "int8": qint8, "float8": qfloat8}[k]
 
