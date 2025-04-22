@@ -33,7 +33,7 @@ from pycocotools.cocoeval import COCOeval
 from aimet_torch.batch_norm_fold import fold_all_batch_norms
 from _centernet import CenterNet, Config, DeformConv, DeformConv2
 from utils.functions import ctdet_decode
-
+from _centernet import deformconv2d
 def logger_enable(prefix=''):
     def console_filter(record):
         # extra에 file_only가 True인 경우 콘솔 출력 제외
@@ -144,7 +144,6 @@ def main(args):
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=_collate_fn_eval, num_workers=args.num_workers)
         processor = lambda hm,wh,reg,metas : _postprocessor(hm, wh, reg ,metas, cat_spec_wh=False, K=100, scale=1.0, post0=ctdet_decode, post1= Ctdet.post_process, post2 = Ctdet.merge_outputs)
         if args.vanilla:  eval(model, args.device, dataloader, processor, 'all fold2')
-
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = ['re:^hm.*', 're:^wh.*', 're:^reg.*']
