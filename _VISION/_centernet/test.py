@@ -9,12 +9,13 @@ import ipdb.stdout
 from loguru import logger
 
 import torch
+from torch.nn import Conv2d, ConvTranspose2d
 from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
 from transformers import DetrImageProcessor, DetrForObjectDetection
 from tqdm import tqdm
 from _util import eval_transform, _collate_fn_eval, keyword_to_itype, _postprocessor, refacor_deformconv, _quantize_deformconv
-from _quanto import _quantize, _Calibration, _requantize
+from _quanto import _quantize, _Calibration, _requantize, is_match
 from safetensors.torch import load_file, save_file
 from optimum.quanto import (
     Calibration,
@@ -31,9 +32,8 @@ from optimum.quanto import (
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from aimet_torch.batch_norm_fold import fold_all_batch_norms
-from _centernet import CenterNet, Config, DeformConv, DeformConv2
+from _centernet import CenterNet, Config, deformconv2d
 from utils.functions import ctdet_decode
-from _centernet import deformconv2d
 def logger_enable(prefix=''):
     def console_filter(record):
         # extra에 file_only가 True인 경우 콘솔 출력 제외
@@ -136,6 +136,21 @@ def main(args):
         model.eval()
         fold_all_batch_norms(model.base, dummy_input.shape, dummy_input=dummy_input) # fold batchnorm for model.base (conv2d+bn case)
         ipdb.set_trace()
+        
+        
+        total = 40330720
+        total_= 39866848
+        target = 0; layers = ['re:^hm.*', 're:^wh.*', 're:^reg.*', 'ida_up.up_2', 'dla_up.ida_0.proj_1.deformconv2d', 'ida_up.node_2.deformconv2d', 'dla_up.ida_0.proj_1.conv_offset_mask', 'ida_up.node_1.deformconv2d', 'dla_up.ida_0.node_1.deformconv2d', 'dla_up.ida_0.up_1', 'base.base_layer.0', 'base.level0.0']        
+        for name, m in model.named_modules():
+            if not isinstance(m,(Conv2d,ConvTranspose2d,deformconv2d)): continue            
+            if not is_match(name,layers): continue
+            param = m.weight.numel()
+            print(name)
+            target+=param
+        
+            
+            
+        
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         preprocessor = lambda image : Ctdet.pre_process(image, 1.0 ,None)    

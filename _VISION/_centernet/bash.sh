@@ -2,8 +2,8 @@
 
 for i in {0..7}; do
   python main.py \
-    --exclude 're:^dla_up.ida_0.*, re:^dla_up.ida_1.node_2.*, ida_up.up_1, re:^ida_up.node_1.*, ida_up.up_2, re:^ida_up.node_2.*' \
-    --prefix "ex8-$i" \
+    --exclude 'ida_up.up_2, dla_up.ida_0.proj_1.deformconv2d, ida_up.node_2.deformconv2d, dla_up.ida_0.proj_1.conv_offset_mask, ida_up.node_1.deformconv2d, dla_up.ida_0.node_1.deformconv2d, dla_up.ida_0.up_1, base.base_layer.0, base.level0.0' \
+    --prefix "ex10-$i" \
     --device "$i" &
 done
 
