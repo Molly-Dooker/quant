@@ -134,7 +134,8 @@ def main(args):
         refacor_deformconv(model) # fold batchnorm while refactoring deformconv (deformconv+bn case)
         dummy_input = torch.randn(1, 3, 512, 512)
         model.eval()
-        fold_all_batch_norms(model.base, dummy_input.shape, dummy_input=dummy_input) # fold batchnorm for model.base (conv2d+bn case)s
+        fold_all_batch_norms(model.base, dummy_input.shape, dummy_input=dummy_input) # fold batchnorm for model.base (conv2d+bn case)
+        ipdb.set_trace()
         img_dir = os.path.join(args.coco_dir,'images', 'val2017')
         ann_file = os.path.join(args.coco_dir, 'annotations', 'instances_val2017.json')
         preprocessor = lambda image : Ctdet.pre_process(image, 1.0 ,None)    
@@ -151,6 +152,7 @@ def main(args):
         logger.info(f'exclude : {exclude}')          
         _quantize(model, weights=weights, activations=activations, exclude=exclude) # nn.Linear, nn.Conv2d + nn.ConvTranspose2d
         _quantize_deformconv(model, weights=weights, activations=activations, exclude=exclude) # deformconv
+        # ipdb.set_trace()
         # 해당 모델에 대해 deformconv 까지 
         if activations is not None:
             with _Calibration(): # custom Calibration
