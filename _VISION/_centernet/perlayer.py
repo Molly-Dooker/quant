@@ -133,7 +133,8 @@ def main(args):
     EVAL = args.eval
 
     if not EVAL:
-        for layer in LAYERS_:
+        
+        for layer in tqdm(LAYERS_):
             logger_enable(layer)
             opt = Config(load_model='_model/ctdet_coco_dla_2x.pth', device=args.device)       
             Ctdet = CenterNet(opt)
@@ -169,11 +170,11 @@ def main(args):
                     calibrate(model, args.device, dataloader,1000)
             freeze(model)
             eval(model, args.device, dataloader, processor, 'quantized')
-            os.makedirs(args.saveroot,exist_ok=True)
-            save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
-            # qmap 저장하기
-            with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
-                json.dump(quantization_map(model), f)
+            # os.makedirs(args.saveroot,exist_ok=True)
+            # save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
+            # # qmap 저장하기
+            # with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
+            #     json.dump(quantization_map(model), f)
         # logger.info('end!')
     if EVAL:
         if args.size==-1:
