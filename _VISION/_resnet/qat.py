@@ -125,16 +125,6 @@ learnable_wt = LearnableFakeQuantize.with_args(
 )
 
 
-# learnable_weights = lambda channels: LearnableFakeQuantize.with_args(
-
-#     quant_min=-128,
-#     quant_max=127,
-#     dtype=torch.qint8,
-#     qscheme=torch.per_channel_symmetric,
-#     use_grad_scaling=True,
-#     channel_len=channels,
-# )
-
 
 def main(args):
     logger_enable(args.prefix)
@@ -146,70 +136,70 @@ def main(args):
         processor = AutoImageProcessor.from_pretrained("microsoft/resnet-50")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-        model.qconfig = None
-        qconfig = tq.QConfig(
-            activation=learnable_act,
-            weight = learnable_wt
+        from torch.ao.quantization import (
+            get_default_qconfig,
+            get_default_qat_qconfig,
+            default_per_channel_symmetric_qnnpack_qconfig,
+            QConfigMapping,
+            QConfig,
+            prepare,         
+            convert,
+            prepare_qat,
+            fake_quantize as fq,
+            HistogramObserver,
+            PerChannelMinMaxObserver,
+            MinMaxObserver,
+            default_per_channel_qconfig
         )
-        for name, m in model.named_modules():
-            if isinstance(m, (nn.Conv2d, nn.Linear)):
-                m.qconfig = qconfig
-        model.train()     
-        ipdb.set_trace()   
-        prepare_qat(model, inplace=True)
-        ipdb.set_trace() 
-        # activation 에 대한 fakequantizer 를 prehook으로 옮김.
-        for name, m in model.named_modules():
-            if isinstance(m, (nn.Conv2d, nn.Linear)):
-                fq = m.activation_post_process
-                m._forward_hooks.clear()  # 출력 후 fake-quant 제거
-                m.register_forward_pre_hook(lambda mod, inp, fq=fq: (fq(inp[0]),))
-        ipdb.set_trace()
-        # model.to(args.device)
-        # input = torch.randn(16,3,256,256,requires_grad=True,device=args.device)        
-        # logit = model(input)
+        from torch.ao.quantization.quantize_fx import (
+            prepare_fx, 
+            convert_fx
+        )
+        
+        qconfig = QConfig(
+            activation = HistogramObserver.with_args(dtype=torch.qint8,qscheme=torch.per_tensor_symmetric,reduce_range=True,quant_min=-128, quant_max=127),
+            weight     = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric, reduce_range=True, quant_min=-128, quant_max=127)            
+        )
+        qat_config = get_default_qat_qconfig(version=0,backend='x86')
+        model.train()
+        model.fc.qconfig = qat_config
+        prepare_qat(model,inplace=True)
+        model.train()
+        model.to(args.device)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.SGD(model.parameters(), lr = 0.01)
+        for batch in dataloader:
+            data, target = batch["pixel_values"], batch["labels"]
+            target[:]=2
+            data= data.to(args.device); target=target.to(args.device)
+            output = model(data)
+            ipdb.set_trace()
+            loss = criterion(output,target)            
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        
+        
+        calibrate(model,args.device,dataloader,500)
+        # ipdb.set_trace()
+        model.to('cpu')
+        convert(model,inplace=True)
+        
+        # weight 
+        model.fc.weight().int_repr()
+        model.fc.weight().dequantize()
+        model.fc.weight().q_per_channel_scales()
+        model.fc.weight().q_per_channel_zero_points()
+
+        
 
 
 
-        if args.default: eval(model, args.device, dataloader, 'default')
 
-        weights = keyword_to_itype(args.weights)
-        activations = keyword_to_itype(args.activations)
-        # make exclude list
-        exclude = ['fc']
-        if args.exclude is not None:
-            exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
-            if args.exclude=='': exclude = []
-        logger.info(f'exclude : {exclude}')   
-        # prepare model to quantize
-        _quantize(model, weights=weights, activations=activations, exclude=exclude)
-        if activations is not None:
-            with _Calibration():
-                calibrate(model, args.device, dataloader, 1000)
-        print("frozen model")
-        freeze(model)
-        eval(model, args.device, dataloader,'quantized')        
-        os.makedirs(args.saveroot,exist_ok=True)
-        save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
-        with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
-            json.dump(quantization_map(model), f)
 
-    if EVAL:
-        processor = ViTImageProcessor.from_pretrained(args.model_name)
-        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-        state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
-        with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
-            qmap = json.load(f)
-        config = ViTConfig.from_pretrained(args.model_name)
-        with init_empty_weights():
-            model = ViTForImageClassification.from_pretrained(args.model_name, config=config)
-        _requantize(model, state_dict, qmap, args.device)
-        freeze(model)
-        eval(model, args.device, dataloader,'reloaded')
 
 if __name__ == "__main__":
 
@@ -220,7 +210,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/ImageNet')
     parser.add_argument("--saveroot", type=str, default='./_model')
     parser.add_argument("--split", type=str, default='validation')
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
