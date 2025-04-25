@@ -17,5 +17,5 @@ uv pip install wandb==0.19.9
 uv pip install torchmetrics==1.7.1
 uv pip install timm==1.0.15
 uv pip install jupyter==1.1.1
-uv pip install https://github.com/quic/aimet/releases/download/2.3.0/aimet_torch-2.3.0+cu121-py38-none-any.whl
+uv pip install https://github.com/quic/aimet/releases/download/2.4.0/aimet_torch-2.4.0+cu121-py38-none-any.whl
 uv pip install numpy==2.1.1
