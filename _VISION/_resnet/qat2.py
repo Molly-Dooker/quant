@@ -157,11 +157,14 @@ def main(args):
             prepare_fx, 
             convert_fx
         )
-              
-        model.fc.qconfig = get_default_qat_qconfig(version=0,backend='x86')
+        
+        qat_config_ = get_default_qat_qconfig(version=0)
+        qat_config  = QConfig(activation=learnable_act, weight=learnable_wt)
+        model.fc.qconfig = qat_config_
         # 이건 quantization parameter 는 학습되지 않음. 오직 weight 만 변경됨
         model.train()
         prepare_qat(model,inplace=True)
+        ipdb.set_trace()
         # fc 는 torch.ao.nn.qat.modules.linear.Linear 가 사용됨.
         # 만약 torch.ao 에서 기본적으로 제공하는 함수가 아닌 다른 함수 (ex deformconv) 라면 커스텀 모듈 만들어야 될듯.
         model.train()
