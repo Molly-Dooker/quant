@@ -124,66 +124,64 @@ learnable_wt = LearnableFakeQuantize.with_args(
     use_grad_scaling=True,
 )
 
-
+from torch.ao.quantization import (
+    get_default_qconfig,
+    get_default_qat_qconfig,
+    default_per_channel_symmetric_qnnpack_qconfig,
+    QConfigMapping,
+    QConfig,
+    prepare,         
+    convert,
+    prepare_qat,
+    fake_quantize as fq,
+    HistogramObserver,
+    PerChannelMinMaxObserver,
+    MinMaxObserver,
+    default_per_channel_qconfig
+)
+from torch.ao.quantization.quantize_fx import (
+    prepare_fx, 
+    convert_fx
+    )
 
 def main(args):
-    logger_enable(args.prefix)
-    EVAL = args.eval
-    if not EVAL : 
-        model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
-        dummy_input = torch.randn(1, 3, 224, 224)
-        fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
-        processor = AutoImageProcessor.from_pretrained("microsoft/resnet-50")
-        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-        from torch.ao.quantization import (
-            get_default_qconfig,
-            get_default_qat_qconfig,
-            default_per_channel_symmetric_qnnpack_qconfig,
-            QConfigMapping,
-            QConfig,
-            prepare,         
-            convert,
-            prepare_qat,
-            fake_quantize as fq,
-            HistogramObserver,
-            PerChannelMinMaxObserver,
-            MinMaxObserver,
-            default_per_channel_qconfig
-        )
-        from torch.ao.quantization.quantize_fx import (
-            prepare_fx, 
-            convert_fx
-        )
+    model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
+    dummy_input = torch.randn(1, 3, 224, 224)
+    fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
+    processor = AutoImageProcessor.from_pretrained("microsoft/resnet-50")
+    ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+    prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+    dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+
+    
+    qat_config_ = get_default_qat_qconfig(version=0)
+    qat_config  = QConfig(activation=learnable_act, weight=learnable_wt)
+    model.fc.qconfig = qat_config_
+    # 이건 quantization parameter 는 학습되지 않음. 오직 weight 만 변경됨
+    model.train()
+    prepare_qat(model,inplace=True)
+    ipdb.set_trace()
+    # fc 는 torch.ao.nn.qat.modules.linear.Linear 가 사용됨.
+    # 만약 torch.ao 에서 기본적으로 제공하는 함수가 아닌 다른 함수 (ex deformconv) 라면 커스텀 모듈 만들어야 될듯.
+    model.train()
+    model.to(args.device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr = 0.1) # weight 및 param 이 변하는지 보기 위해 큰값을 적용함.
+    
+    for batch in dataloader:
+        data, target = batch["pixel_values"], batch["labels"]
+        data= data.to(args.device)            
+        output = model(data)
         
-        qat_config_ = get_default_qat_qconfig(version=0)
-        qat_config  = QConfig(activation=learnable_act, weight=learnable_wt)
-        model.fc.qconfig = qat_config_
-        # 이건 quantization parameter 는 학습되지 않음. 오직 weight 만 변경됨
-        model.train()
-        prepare_qat(model,inplace=True)
-        ipdb.set_trace()
-        # fc 는 torch.ao.nn.qat.modules.linear.Linear 가 사용됨.
-        # 만약 torch.ao 에서 기본적으로 제공하는 함수가 아닌 다른 함수 (ex deformconv) 라면 커스텀 모듈 만들어야 될듯.
-        model.train()
-        model.to(args.device)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.SGD(model.parameters(), lr = 0.1) # weight 및 param 이 변하는지 보기 위해 큰값을 적용함.
+        target[:]=4 # loss 증가위해 일부로
+        target = target.to(args.device)
         
-        for batch in dataloader:
-            data, target = batch["pixel_values"], batch["labels"]
-            data= data.to(args.device)            
-            output = model(data)
-            
-            target[:]=4 # loss 증가위해 일부로
-            target = target.to(args.device)
-            
-            loss = criterion(output, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        loss = criterion(output, target)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
         
         
         
