@@ -99,7 +99,9 @@ def main(args):
             if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')   
         # prepare model to quantize
-        _quantize(model, weights=weights, activations=activations, exclude=exclude)
+        _quantize(model, weights=weights, activations=activations, exclude=[])
+        ipdb.set_trace()
+
         if activations is not None:
             with _Calibration():
                 calibrate(model, args.device, dataloader, 1000)
@@ -129,7 +131,7 @@ def main(args):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="resnet")
-    parser.add_argument("--prefix", type=str, default="resnet1")
+    parser.add_argument("--prefix", type=str, default="resnet11")
     # parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
     parser.add_argument("--dataset_name", type=str, default="Tsomaros/Imagenet-1k_validation")
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/ImageNet')
