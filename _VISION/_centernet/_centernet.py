@@ -516,345 +516,339 @@ class DLASeg(nn.Module):
 
 
 
-def load_model(model, model_path, optimizer=None, resume=False, 
-               lr=None, lr_step=None):
-  start_epoch = 0
-  checkpoint = torch.load(model_path, map_location=lambda storage, loc: storage)
-  print('loaded {}, epoch {}'.format(model_path, checkpoint['epoch']))
-  state_dict_ = checkpoint['state_dict']
-  state_dict = {}
-  # convert data_parallal to model
-  for k in state_dict_:
-    if k.startswith('module') and not k.startswith('module_list'):
-      state_dict[k[7:]] = state_dict_[k]
-    else:
-      state_dict[k] = state_dict_[k]
-  model_state_dict = model.state_dict()
+def load_model(model, model_path, optimizer=None, resume=False, lr=None, lr_step=None):
+	start_epoch = 0
+	checkpoint = torch.load(model_path, map_location=lambda storage, loc: storage)
+	print('loaded {}, epoch {}'.format(model_path, checkpoint['epoch']))
+	state_dict_ = checkpoint['state_dict']
+	state_dict = {}
+	# convert data_parallal to model
+	for k in state_dict_:
+		if k.startswith('module') and not k.startswith('module_list'):
+			state_dict[k[7:]] = state_dict_[k]
+		else:
+			state_dict[k] = state_dict_[k]
+	model_state_dict = model.state_dict()
 
-  # check loaded parameters and created model parameters
-  msg = 'If you see this, your model does not fully load the ' + \
-        'pre-trained weight. Please make sure ' + \
-        'you have correctly specified --arch xxx ' + \
-        'or set the correct --num_classes for your own dataset.'
-  for k in state_dict:
-    if k in model_state_dict:
-      if state_dict[k].shape != model_state_dict[k].shape:
-        print('Skip loading parameter {}, required shape{}, '\
-              'loaded shape{}. {}'.format(
-          k, model_state_dict[k].shape, state_dict[k].shape, msg))
-        state_dict[k] = model_state_dict[k]
-    else:
-      print('Drop parameter {}.'.format(k) + msg)
-  for k in model_state_dict:
-    if not (k in state_dict):
-      print('No param {}.'.format(k) + msg)
-      state_dict[k] = model_state_dict[k]
-  model.load_state_dict(state_dict, strict=False)
+	# check loaded parameters and created model parameters
+	msg = 'If you see this, your model does not fully load the ' + \
+		'pre-trained weight. Please make sure ' + \
+		'you have correctly specified --arch xxx ' + \
+		'or set the correct --num_classes for your own dataset.'
+	for k in state_dict:
+		if k in model_state_dict:
+			if state_dict[k].shape != model_state_dict[k].shape:
+				print('Skip loading parameter {}, required shape{}, '\
+				'loaded shape{}. {}'.format(k, model_state_dict[k].shape, state_dict[k].shape, msg))
+				state_dict[k] = model_state_dict[k]
+		else:
+			print('Drop parameter {}.'.format(k) + msg)
+	for k in model_state_dict:
+		if not (k in state_dict):
+			print('No param {}.'.format(k) + msg)
+			state_dict[k] = model_state_dict[k]
+	model.load_state_dict(state_dict, strict=False)
 
-  # resume optimizer parameters
-  if optimizer is not None and resume:
-    if 'optimizer' in checkpoint:
-      optimizer.load_state_dict(checkpoint['optimizer'])
-      start_epoch = checkpoint['epoch']
-      start_lr = lr
-      for step in lr_step:
-        if start_epoch >= step:
-          start_lr *= 0.1
-      for param_group in optimizer.param_groups:
-        param_group['lr'] = start_lr
-      print('Resumed optimizer with start lr', start_lr)
-    else:
-      print('No optimizer parameters in checkpoint.')
-  if optimizer is not None:
-    return model, optimizer, start_epoch
-  else:
-    return model
+	# resume optimizer parameters
+	if optimizer is not None and resume:
+		if 'optimizer' in checkpoint:
+			optimizer.load_state_dict(checkpoint['optimizer'])
+			start_epoch = checkpoint['epoch']
+			start_lr = lr
+			for step in lr_step:
+				if start_epoch >= step:
+					start_lr *= 0.1
+			for param_group in optimizer.param_groups:
+				param_group['lr'] = start_lr
+			print('Resumed optimizer with start lr', start_lr)
+		else:
+			print('No optimizer parameters in checkpoint.')
+	if optimizer is not None:
+		return model, optimizer, start_epoch
+	else:
+		return model
 
 class CenterNet(nn.Module):
-  def __init__(self, opt):
-    super(CenterNet, self).__init__()
-    self.weight_path = opt.load_model
-    print('Creating model...')
-    print("opt: ", opt)
-    self.mean  = opt.mean
-    self.std   = opt.std
-    self.model = DLASeg(pretrained=True, weightpath = os.path.dirname(self.weight_path)) # base weight 로드함. 이 weight 는 torch model zoo 에서 받아옴
-    self.model = load_model(self.model, self.weight_path) # 나머지 weight 로드함. 이 weight 는 사전에 받아놓은 weight
-    # self.model = self.model.to(device)
-    self.model.eval()
-    self.mean = np.array(self.mean, dtype=np.float32).reshape(1, 1, 3)
-    self.std = np.array(self.std, dtype=np.float32).reshape(1, 1, 3)
-    self.max_per_image = 100
-    self.num_classes = opt.num_classes
-    self.scales = opt.test_scales
-    self.opt = opt
-    self.pause = True
-    # self.opt.device = device
+	def __init__(self, opt):
+		super(CenterNet, self).__init__()
+		self.weight_path = opt.load_model
+		print('Creating model...')
+		print("opt: ", opt)
+		self.mean  = opt.mean
+		self.std   = opt.std
+		self.model = DLASeg(pretrained=True, weightpath = os.path.dirname(self.weight_path)) # base weight 로드함. 이 weight 는 torch model zoo 에서 받아옴
+		self.model = load_model(self.model, self.weight_path) # 나머지 weight 로드함. 이 weight 는 사전에 받아놓은 weight
+		# self.model = self.model.to(device)
+		self.model.eval()
+		self.mean = np.array(self.mean, dtype=np.float32).reshape(1, 1, 3)
+		self.std = np.array(self.std, dtype=np.float32).reshape(1, 1, 3)
+		self.max_per_image = 100
+		self.num_classes = opt.num_classes
+		self.scales = opt.test_scales
+		self.opt = opt
+		self.pause = True
+		# self.opt.device = device
 
-  def pre_process(self, image, scale, meta=None):
-    height, width = image.shape[0:2]
-    new_height = int(height * scale)
-    new_width  = int(width * scale)
-    if self.opt.fix_res:
-      inp_height, inp_width = self.opt.input_h, self.opt.input_w
-      c = np.array([new_width / 2., new_height / 2.], dtype=np.float32)
-      s = max(height, width) * 1.0
-    else:
-      inp_height = (new_height | self.opt.pad) + 1
-      inp_width = (new_width | self.opt.pad) + 1
-      c = np.array([new_width // 2, new_height // 2], dtype=np.float32)
-      s = np.array([inp_width, inp_height], dtype=np.float32)
+	def pre_process(self, image, scale, meta=None):
+		height, width = image.shape[0:2]
+		new_height = int(height * scale)
+		new_width  = int(width * scale)
+		if self.opt.fix_res:
+			inp_height, inp_width = self.opt.input_h, self.opt.input_w
+			c = np.array([new_width / 2., new_height / 2.], dtype=np.float32)
+			s = max(height, width) * 1.0
+		else:
+			inp_height = (new_height | self.opt.pad) + 1
+			inp_width = (new_width | self.opt.pad) + 1
+			c = np.array([new_width // 2, new_height // 2], dtype=np.float32)
+			s = np.array([inp_width, inp_height], dtype=np.float32)
 
-    trans_input = get_affine_transform(c, s, 0, [inp_width, inp_height])
-    resized_image = cv2.resize(image, (new_width, new_height))
-    inp_image = cv2.warpAffine(
-      resized_image, trans_input, (inp_width, inp_height),
-      flags=cv2.INTER_LINEAR)
-    inp_image = ((inp_image / 255. - self.mean) / self.std).astype(np.float32)
+		trans_input = get_affine_transform(c, s, 0, [inp_width, inp_height])
+		resized_image = cv2.resize(image, (new_width, new_height))
+		inp_image = cv2.warpAffine(resized_image, trans_input, (inp_width, inp_height), flags=cv2.INTER_LINEAR)
+		inp_image = ((inp_image / 255. - self.mean) / self.std).astype(np.float32)
 
-    images = inp_image.transpose(2, 0, 1).reshape(1, 3, inp_height, inp_width)
-    if self.opt.flip_test:
-      images = np.concatenate((images, images[:, :, :, ::-1]), axis=0)
-    images = torch.from_numpy(images)
-    meta = {'c': c, 's': s, 
-            'out_height': inp_height // self.opt.down_ratio, 
-            'out_width': inp_width // self.opt.down_ratio}
-    return images, meta
+		images = inp_image.transpose(2, 0, 1).reshape(1, 3, inp_height, inp_width)
+		if self.opt.flip_test:
+			images = np.concatenate((images, images[:, :, :, ::-1]), axis=0)
+		images = torch.from_numpy(images)
+		meta = {'c': c, 's': s, 
+				'out_height': inp_height // self.opt.down_ratio, 
+				'out_width': inp_width // self.opt.down_ratio}
+		return images, meta
 
-  def process(self, images, return_time=False):
-    with torch.no_grad():
-      output = self.model(images)      
-      hm = output['hm'].sigmoid_()
-      wh = output['wh']
-      reg = output['reg'] if self.opt.reg_offset else None
-      if self.opt.flip_test:
-        hm = (hm[0:1] + flip_tensor(hm[1:2])) / 2
-        wh = (wh[0:1] + flip_tensor(wh[1:2])) / 2
-        reg = reg[0:1] if reg is not None else None
-      forward_time = time.time()       
-      dets = ctdet_decode(hm, wh, reg=reg, cat_spec_wh=self.opt.cat_spec_wh, K=self.opt.K)
+	def process(self, images, return_time=False):
+		with torch.no_grad():
+			output = self.model(images)      
+			hm = output['hm'].sigmoid_()
+			wh = output['wh']
+			reg = output['reg'] if self.opt.reg_offset else None
+			if self.opt.flip_test:
+				hm = (hm[0:1] + flip_tensor(hm[1:2])) / 2
+				wh = (wh[0:1] + flip_tensor(wh[1:2])) / 2
+				reg = reg[0:1] if reg is not None else None
+			forward_time = time.time()       
+			dets = ctdet_decode(hm, wh, reg=reg, cat_spec_wh=self.opt.cat_spec_wh, K=self.opt.K)
 
-    if return_time:
-      return output, dets, forward_time
-    else:
-      return output, dets
+		if return_time:
+			return output, dets, forward_time
+		else:
+			return output, dets
 
-  def post_process(self, dets, meta, scale=1):
-    dets = dets.detach().cpu().numpy()
-    dets = dets.reshape(1, -1, dets.shape[2])
-    dets = ctdet_post_process(
-        dets.copy(), [meta['c']], [meta['s']],
-        meta['out_height'], meta['out_width'], self.opt.num_classes)
-    for j in range(1, self.num_classes + 1):
-      dets[0][j] = np.array(dets[0][j], dtype=np.float32).reshape(-1, 5)
-      dets[0][j][:, :4] /= scale
-    return dets[0]
+	def post_process(self, dets, meta, scale=1):
+		dets = dets.detach().cpu().numpy()
+		dets = dets.reshape(1, -1, dets.shape[2])
+		dets = ctdet_post_process(
+      		dets.copy(), [meta['c']], [meta['s']],
+			meta['out_height'], meta['out_width'], self.opt.num_classes)
+		for j in range(1, self.num_classes + 1):
+			dets[0][j] = np.array(dets[0][j], dtype=np.float32).reshape(-1, 5)
+			dets[0][j][:, :4] /= scale
+		return dets[0]
 
-  def merge_outputs(self, detections):
-    if isinstance(detections,dict): detections= [detections]    
-    results = {}
-    for j in range(1, self.num_classes + 1):
-      results[j] = np.concatenate(
-        [detection[j] for detection in detections], axis=0).astype(np.float32)
-      # if len(self.scales) > 1 or self.opt.nms:
-      #    soft_nms(results[j], Nt=0.5, method=2)
-    scores = np.hstack(
-      [results[j][:, 4] for j in range(1, self.num_classes + 1)])
-    if len(scores) > self.max_per_image:
-      kth = len(scores) - self.max_per_image
-      thresh = np.partition(scores, kth)[kth]
-      for j in range(1, self.num_classes + 1):
-        keep_inds = (results[j][:, 4] >= thresh)
-        results[j] = results[j][keep_inds]
-    return results
+	def merge_outputs(self, detections):
+		if isinstance(detections,dict): detections= [detections]    
+		results = {}
+		for j in range(1, self.num_classes + 1):
+			results[j] = np.concatenate([detection[j] for detection in detections], axis=0).astype(np.float32)
+		# if len(self.scales) > 1 or self.opt.nms:
+		#    soft_nms(results[j], Nt=0.5, method=2)
+		scores = np.hstack([results[j][:, 4] for j in range(1, self.num_classes + 1)])
+		if len(scores) > self.max_per_image:
+			kth = len(scores) - self.max_per_image
+			thresh = np.partition(scores, kth)[kth]
+			for j in range(1, self.num_classes + 1):
+				keep_inds = (results[j][:, 4] >= thresh)
+				results[j] = results[j][keep_inds]
+		return results
 
-  def debug(self, debugger, images, dets, output, scale=1):
-    detection = dets.detach().cpu().numpy().copy()
-    detection[:, :, :4] *= self.opt.down_ratio
-    for i in range(1):
-      img = images[i].detach().cpu().numpy().transpose(1, 2, 0)
-      img = ((img * self.std + self.mean) * 255).astype(np.uint8)
-      pred = debugger.gen_colormap(output['hm'][i].detach().cpu().numpy())
-      debugger.add_blend_img(img, pred, 'pred_hm_{:.1f}'.format(scale))
-      debugger.add_img(img, img_id='out_pred_{:.1f}'.format(scale))
-      for k in range(len(dets[i])):
-        if detection[i, k, 4] > self.opt.center_thresh:
-          debugger.add_coco_bbox(detection[i, k, :4], detection[i, k, -1],
-                                 detection[i, k, 4], 
-                                 img_id='out_pred_{:.1f}'.format(scale))
+	def debug(self, debugger, images, dets, output, scale=1):
+		detection = dets.detach().cpu().numpy().copy()
+		detection[:, :, :4] *= self.opt.down_ratio
+		for i in range(1):
+			img = images[i].detach().cpu().numpy().transpose(1, 2, 0)
+			img = ((img * self.std + self.mean) * 255).astype(np.uint8)
+			pred = debugger.gen_colormap(output['hm'][i].detach().cpu().numpy())
+			debugger.add_blend_img(img, pred, 'pred_hm_{:.1f}'.format(scale))
+			debugger.add_img(img, img_id='out_pred_{:.1f}'.format(scale))
+			for k in range(len(dets[i])):
+				if detection[i, k, 4] > self.opt.center_thresh:
+					debugger.add_coco_bbox(detection[i, k, :4], detection[i, k, -1],
+									detection[i, k, 4], 
+									img_id='out_pred_{:.1f}'.format(scale))
 
-  def show_results(self, debugger, image, results):
-    debugger.add_img(image, img_id='ctdet')
-    for j in range(1, self.num_classes + 1):
-      for bbox in results[j]:
-        if bbox[4] > self.opt.vis_thresh:
-          debugger.add_coco_bbox(bbox[:4], j - 1, bbox[4], img_id='ctdet')
-    debugger.save_img(imgId='ctdet', path='./')
+	def show_results(self, debugger, image, results):
+		debugger.add_img(image, img_id='ctdet')
+		for j in range(1, self.num_classes + 1):
+			for bbox in results[j]:
+				if bbox[4] > self.opt.vis_thresh:
+					debugger.add_coco_bbox(bbox[:4], j - 1, bbox[4], img_id='ctdet')
+		debugger.save_img(imgId='ctdet', path='./')
 
-  def run(self, image_or_path_or_tensor, meta=None):
-    load_time, pre_time, net_time, dec_time, post_time = 0, 0, 0, 0, 0
-    merge_time, tot_time = 0, 0
-    debugger = Debugger(dataset=self.opt.dataset, ipynb=(self.opt.debug==3),
-                        theme=self.opt.debugger_theme)
-    start_time = time.time()
-    pre_processed = False
-    if isinstance(image_or_path_or_tensor, np.ndarray):
-      image = image_or_path_or_tensor
-    elif type(image_or_path_or_tensor) == type (''): 
-      image = cv2.imread(image_or_path_or_tensor)
-    else:
-      image = image_or_path_or_tensor['image'][0].numpy()
-      pre_processed_images = image_or_path_or_tensor
-      pre_processed = True
-    
-    loaded_time = time.time()
-    load_time += (loaded_time - start_time)
-    
-    detections = []
-    
-    for scale in self.scales:
-      scale_start_time = time.time()
-      if not pre_processed: #pre_processed = False
-        images, meta = self.pre_process(image, scale, meta)
-      else:
-        # import pdb; pdb.set_trace()
-        images = pre_processed_images['images'][scale][0]
-        meta = pre_processed_images['meta'][scale]
-        meta = {k: v.numpy()[0] for k, v in meta.items()}
-      images = images.to(self.opt.device)
-      pre_process_time = time.time()
-      pre_time += pre_process_time - scale_start_time
+	def run(self, image_or_path_or_tensor, meta=None):
+		load_time, pre_time, net_time, dec_time, post_time = 0, 0, 0, 0, 0
+		merge_time, tot_time = 0, 0
+		debugger = Debugger(dataset=self.opt.dataset, ipynb=(self.opt.debug==3),
+                      theme=self.opt.debugger_theme)
+		start_time = time.time()
+		pre_processed = False
+		if isinstance(image_or_path_or_tensor, np.ndarray):
+			image = image_or_path_or_tensor
+		elif type(image_or_path_or_tensor) == type (''): 
+			image = cv2.imread(image_or_path_or_tensor)
+		else:
+			image = image_or_path_or_tensor['image'][0].numpy()
+			pre_processed_images = image_or_path_or_tensor
+			pre_processed = True
+		
+		loaded_time = time.time()
+		load_time += (loaded_time - start_time)
+		
+		detections = []
+		
+		for scale in self.scales:
+			scale_start_time = time.time()
+			if not pre_processed: #pre_processed = False
+				images, meta = self.pre_process(image, scale, meta)
+			else:
+				# import pdb; pdb.set_trace()
+				images = pre_processed_images['images'][scale][0]
+				meta = pre_processed_images['meta'][scale]
+				meta = {k: v.numpy()[0] for k, v in meta.items()}
+			images = images.to(self.opt.device)
+			pre_process_time = time.time()
+			pre_time += pre_process_time - scale_start_time
 
-      output, dets, forward_time = self.process(images, return_time=True)
+			output, dets, forward_time = self.process(images, return_time=True)
 
-      net_time += forward_time - pre_process_time
-      decode_time = time.time()
-      dec_time += decode_time - forward_time
-      # if self.opt.debug >= 2:
-      #   self.debug(debugger, images, dets, output, scale)
-      dets_ = self.post_process(dets, meta, scale)
-      post_process_time = time.time()
-      post_time += post_process_time - decode_time
-      detections.append(dets_)
+			net_time += forward_time - pre_process_time
+			decode_time = time.time()
+			dec_time += decode_time - forward_time
+			# if self.opt.debug >= 2:
+			#   self.debug(debugger, images, dets, output, scale)
+			dets_ = self.post_process(dets, meta, scale)
+			post_process_time = time.time()
+			post_time += post_process_time - decode_time
+			detections.append(dets_)
 
-    results = self.merge_outputs(detections)
+		results = self.merge_outputs(detections)
 
-    end_time = time.time()
-    merge_time += end_time - post_process_time
-    tot_time += end_time - start_time
-    # print("Debug")
-    self.show_results(debugger, image, results)
-    
-    return {'results': results, 'tot': tot_time, 'load': load_time,
-            'pre': pre_time, 'net': net_time, 'dec': dec_time,
-            'post': post_time, 'merge': merge_time}
+		end_time = time.time()
+		merge_time += end_time - post_process_time
+		tot_time += end_time - start_time
+		# print("Debug")
+		self.show_results(debugger, image, results)
+		
+		return {'results': results, 'tot': tot_time, 'load': load_time,
+				'pre': pre_time, 'net': net_time, 'dec': dec_time,
+				'post': post_time, 'merge': merge_time}
 
 
 
 class Config: 
-   def __init__(self,load_model, device):
-    self.K=100
-    self.aggr_weight=0.0
-    self.agnostic_ex=False
-    self.arch='dla_34'
-    self.aug_ddd=0.5
-    self.aug_rot=0
-    self.batch_size=32
-    self.cat_spec_wh=False
-    self.center_thresh=0.1
-    self.chunk_sizes=[32]
-    self.dataset='coco'
-    self.debug=0
-    self.debugger_theme='white'
-    self.demo='.'
-    self.dense_hp=False
-    self.dense_wh=False
-    self.dep_weight=1
-    self.dim_weight=1
-    self.down_ratio=4
-    self.eval_oracle_dep=False
-    self.eval_oracle_hm=False
-    self.eval_oracle_hmhp=False
-    self.eval_oracle_hp_offset=False
-    self.eval_oracle_kps=False
-    self.eval_oracle_offset=False
-    self.eval_oracle_wh=False
-    self.exp_id='default'
-    self.fix_res=True
-    self.flip=0.5
-    self.flip_test=False
-    self.gpus=[0]
-    self.gpus_str='0'
-    self.head_conv=256, 
-    self.heads={'hm': 80, 'wh': 2, 'reg': 2}
-    self.hide_data_time=False
-    self.hm_hp=True
-    self.hm_hp_weight=1
-    self.hm_weight=1
-    self.hp_weight=1
-    self.input_h=512
-    self.input_res=512
-    self.input_w=512
-    self.keep_res=False
-    self.kitti_split='3dop'
-    # self.load_model='../weights/ctdet_coco_dla_2x.pth'
-    self.load_model = load_model
-    self.device = device
-    self.lr=0.000125
-    self.lr_step=[90, 120]
-    self.master_batch_size=32
-    self.mean=[0.408, 0.447, 0.47]
-    self.metric='loss'
-    self.mse_loss=False
-    self.nms=False
-    self.no_color_aug=False
-    self.norm_wh=False
-    self.not_cuda_benchmark=False
-    self.not_hm_hp=False
-    self.not_prefetch_test=False
-    self.not_rand_crop=False
-    self.not_reg_bbox=False
-    self.not_reg_hp_offset=False
-    self.not_reg_offset=False
-    self.num_classes=80
-    self.num_epochs=140
-    self.num_iters=-1
-    self.num_stacks=1
-    self.num_workers=4
-    self.off_weight=1
-    self.output_h=128
-    self.output_res=128
-    self.output_w=128
-    self.pad=31
-    self.peak_thresh=0.2
-    self.print_iter=0
-    self.rect_mask=False
-    self.reg_bbox=True
-    self.reg_hp_offset=True
-    self.reg_loss='l1'
-    self.reg_offset=True
-    self.resume=False
-    self.rot_weight=1
-    self.rotate=0
-    self.save_all=False
-    self.scale=0.4
-    self.scores_thresh=0.1
-    self.seed=317
-    self.shift=0.1
-    self.std=[0.289, 0.274, 0.278]
-    self.task='ctdet'
-    self.test=False
-    self.test_scales=[1.0]
-    self.trainval=False
-    self.val_intervals=5
-    self.vis_thresh=0.3
-    self.wh_weight=0.1
+	def __init__(self,load_model, device):
+		self.K=100
+		self.aggr_weight=0.0
+		self.agnostic_ex=False
+		self.arch='dla_34'
+		self.aug_ddd=0.5
+		self.aug_rot=0
+		self.batch_size=32
+		self.cat_spec_wh=False
+		self.center_thresh=0.1
+		self.chunk_sizes=[32]
+		self.dataset='coco'
+		self.debug=0
+		self.debugger_theme='white'
+		self.demo='.'
+		self.dense_hp=False
+		self.dense_wh=False
+		self.dep_weight=1
+		self.dim_weight=1
+		self.down_ratio=4
+		self.eval_oracle_dep=False
+		self.eval_oracle_hm=False
+		self.eval_oracle_hmhp=False
+		self.eval_oracle_hp_offset=False
+		self.eval_oracle_kps=False
+		self.eval_oracle_offset=False
+		self.eval_oracle_wh=False
+		self.exp_id='default'
+		self.fix_res=True
+		self.flip=0.5
+		self.flip_test=False
+		self.gpus=[0]
+		self.gpus_str='0'
+		self.head_conv=256, 
+		self.heads={'hm': 80, 'wh': 2, 'reg': 2}
+		self.hide_data_time=False
+		self.hm_hp=True
+		self.hm_hp_weight=1
+		self.hm_weight=1
+		self.hp_weight=1
+		self.input_h=512
+		self.input_res=512
+		self.input_w=512
+		self.keep_res=False
+		self.kitti_split='3dop'
+		# self.load_model='../weights/ctdet_coco_dla_2x.pth'
+		self.load_model = load_model
+		self.device = device
+		self.lr=0.000125
+		self.lr_step=[90, 120]
+		self.master_batch_size=32
+		self.mean=[0.408, 0.447, 0.47]
+		self.metric='loss'
+		self.mse_loss=False
+		self.nms=False
+		self.no_color_aug=False
+		self.norm_wh=False
+		self.not_cuda_benchmark=False
+		self.not_hm_hp=False
+		self.not_prefetch_test=False
+		self.not_rand_crop=False
+		self.not_reg_bbox=False
+		self.not_reg_hp_offset=False
+		self.not_reg_offset=False
+		self.num_classes=80
+		self.num_epochs=140
+		self.num_iters=-1
+		self.num_stacks=1
+		self.num_workers=4
+		self.off_weight=1
+		self.output_h=128
+		self.output_res=128
+		self.output_w=128
+		self.pad=31
+		self.peak_thresh=0.2
+		self.print_iter=0
+		self.rect_mask=False
+		self.reg_bbox=True
+		self.reg_hp_offset=True
+		self.reg_loss='l1'
+		self.reg_offset=True
+		self.resume=False
+		self.rot_weight=1
+		self.rotate=0
+		self.save_all=False
+		self.scale=0.4
+		self.scores_thresh=0.1
+		self.seed=317
+		self.shift=0.1
+		self.std=[0.289, 0.274, 0.278]
+		self.task='ctdet'
+		self.test=False
+		self.test_scales=[1.0]
+		self.trainval=False
+		self.val_intervals=5
+		self.vis_thresh=0.3
+		self.wh_weight=0.1
 
 
 if __name__ == '__main__':
-  opt = Config()
-  torch.manual_seed(0)
-  device = 'cuda:2'
-  Ctdet = CenterNet(opt,device)
-  img = cv2.imread("im2.jpg")
-  Ctdet.run(img)
+	opt = Config()
+	torch.manual_seed(0)
+	device = 'cuda:2'
+	Ctdet = CenterNet(opt,device)
+	img = cv2.imread("im2.jpg")
+	Ctdet.run(img)
