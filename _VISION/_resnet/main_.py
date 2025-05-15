@@ -78,8 +78,7 @@ def calibrate(model, device, dataloader, num=10000):
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
-    if not EVAL : 
-
+    if not EVAL :
         model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
         dummy_input = torch.randn(1, 3, 224, 224)
         fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
@@ -99,12 +98,13 @@ def main(args):
             if args.exclude=='': exclude = []
         logger.info(f'exclude : {exclude}')   
         # prepare model to quantize
-        _quantize(model, weights=weights, activations=activations, exclude=[])
+        _quantize(model, weights=weights, activations=activations, include=exclude)
         ipdb.set_trace()
-
         if activations is not None:
             with _Calibration():
                 calibrate(model, args.device, dataloader, 1000)
+        ipdb.set_trace()
+        import optimum.quanto.nn.qlinear
         print("frozen model")
         freeze(model)
         eval(model, args.device, dataloader,'quantized')        
