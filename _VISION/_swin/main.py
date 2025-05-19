@@ -87,7 +87,7 @@ def main(args):
                 param = m.weight.numel()
                 total+=param
 
-        ipdb.set_trace()   
+
         processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-base-patch4-window8-256")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
