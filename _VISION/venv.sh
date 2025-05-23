@@ -1,8 +1,8 @@
 # python 3.10.12
 pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-pip install transformers==4.51.2
+pip install transformers==4.52.2
 pip install accelerate==1.7.0
-pip install optimum==1.24.0
+pip install optimum==1.25.3
 pip install optimum-quanto==0.2.7
 pip install ultralytics==8.3.97
 pip install scikit-learn==1.6.1
