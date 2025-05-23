@@ -1,0 +1,367 @@
+BEVFormer[tt](
+  (img_backbone): ResNet[tt](
+    (conv1): ConvModule[tt](
+      (conv): Conv2dSplit[tt](3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), input_shape=torch.Size([6, 3, 900, 1600]), output_shape=torch.Size([6, 64, 450, 800]))
+    )
+    (maxpool): MaxPool2d[tt](kernel_size=[3, 3], stride=[2, 2], padding=[1, 1], dilation=[1, 1])
+    (layer1): ResLayer(
+      (0): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](384, 384, kernel_size=(1, 1), stride=(1, 1), groups=6, input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 64, 225, 400]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 64, 225, 400]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](64, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 256, 225, 400]))
+        )
+        (downsample): Sequential(
+          (0): ConvModule[tt](
+            (conv): Conv2dSplit[tt](64, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 256, 225, 400]))
+          )
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (1): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 64, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 225, 400]), output_shape=torch.Size([6, 64, 225, 400]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 64, 225, 400]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](64, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 256, 225, 400]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (2): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 64, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 225, 400]), output_shape=torch.Size([6, 64, 225, 400]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 64, 225, 400]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](64, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 64, 225, 400]), output_shape=torch.Size([6, 256, 225, 400]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+    )
+    (layer2): ResLayer(
+      (3): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 128, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 225, 400]), output_shape=torch.Size([6, 128, 225, 400]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), input_shape=torch.Size([6, 128, 225, 400]), output_shape=torch.Size([6, 128, 113, 200]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 512, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 128, 113, 200]), output_shape=torch.Size([6, 512, 113, 200]))
+        )
+        (downsample): Sequential(
+          (0): ConvModule[tt](
+            (conv): Conv2dSplit[tt](256, 512, kernel_size=(1, 1), stride=(2, 2), input_shape=torch.Size([6, 256, 225, 400]), output_shape=torch.Size([6, 512, 113, 200]))
+          )
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (4): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](512, 128, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 512, 113, 200]), output_shape=torch.Size([6, 128, 113, 200]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 128, 113, 200]), output_shape=torch.Size([6, 128, 113, 200]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 512, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 128, 113, 200]), output_shape=torch.Size([6, 512, 113, 200]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (5): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](512, 128, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 512, 113, 200]), output_shape=torch.Size([6, 128, 113, 200]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 128, 113, 200]), output_shape=torch.Size([6, 128, 113, 200]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 512, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 128, 113, 200]), output_shape=torch.Size([6, 512, 113, 200]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (6): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](512, 128, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 512, 113, 200]), output_shape=torch.Size([6, 128, 113, 200]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 128, 113, 200]), output_shape=torch.Size([6, 128, 113, 200]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](128, 512, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 128, 113, 200]), output_shape=torch.Size([6, 512, 113, 200]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+    )
+    (layer3): ResLayer(
+      (7): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](512, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 512, 113, 200]), output_shape=torch.Size([6, 256, 113, 200]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), input_shape=torch.Size([6, 256, 113, 200]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 1024, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 1024, 57, 100]))
+        )
+        (downsample): Sequential(
+          (0): ConvModule[tt](
+            (conv): Conv2dSplit[tt](512, 1024, kernel_size=(1, 1), stride=(2, 2), input_shape=torch.Size([6, 512, 113, 200]), output_shape=torch.Size([6, 1024, 57, 100]))
+          )
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (8): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](1024, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 1024, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 1024, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 1024, 57, 100]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (9): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](1024, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 1024, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 1024, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 1024, 57, 100]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (10): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](1024, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 1024, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 1024, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 1024, 57, 100]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (11): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](1024, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 1024, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 1024, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 1024, 57, 100]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (12): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](1024, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 1024, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 256, 57, 100]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplit[tt](256, 1024, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 256, 57, 100]), output_shape=torch.Size([6, 1024, 57, 100]))
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+    )
+    (layer4): ResLayer(
+      (13): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplit[tt](1024, 512, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 1024, 57, 100]), output_shape=torch.Size([6, 512, 57, 100]))
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](512, 512, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), input_shape=torch.Size([6, 512, 57, 100]), output_shape=torch.Size([6, 512, 29, 50]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplitChannels[tt](
+            512, 2048, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 512, 29, 50]), output_shape=torch.Size([6, 2048, 29, 50])
+            (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+          )
+        )
+        (downsample): Sequential(
+          (0): ConvModule[tt](
+            (conv): Conv2dSplit[tt](1024, 2048, kernel_size=(1, 1), stride=(2, 2), input_shape=torch.Size([6, 1024, 57, 100]), output_shape=torch.Size([6, 2048, 29, 50]))
+          )
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (14): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplitChannels[tt](
+            2048, 512, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 2048, 29, 50]), output_shape=torch.Size([6, 512, 29, 50])
+            (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+          )
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 512, 29, 50]), output_shape=torch.Size([6, 512, 29, 50]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplitChannels[tt](
+            512, 2048, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 512, 29, 50]), output_shape=torch.Size([6, 2048, 29, 50])
+            (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+          )
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+      (15): Bottleneck[tt](
+        (conv1): ConvModule[tt](
+          (conv): Conv2dSplitChannels[tt](
+            2048, 512, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 2048, 29, 50]), output_shape=torch.Size([6, 512, 29, 50])
+            (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+          )
+        )
+        (conv2): ConvModule[tt](
+          (conv): Conv2dSplit[tt](512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 512, 29, 50]), output_shape=torch.Size([6, 512, 29, 50]))
+        )
+        (conv3): ConvModule[tt](
+          (conv): Conv2dSplitChannels[tt](
+            512, 2048, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 512, 29, 50]), output_shape=torch.Size([6, 2048, 29, 50])
+            (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+          )
+        )
+        (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+      )
+    )
+  )
+  (img_neck): FPN[tt](
+    (lateral_convs): ModuleList(
+      (0): FPNConvModule[tt](
+        (conv): Conv2dSplit[tt](2048, 256, kernel_size=(1, 1), stride=(1, 1), input_shape=torch.Size([6, 2048, 29, 50]), output_shape=torch.Size([6, 256, 29, 50]))
+      )
+    )
+    (fpn_convs): ModuleList(
+      (0): FPNConvModule[tt](
+        (conv): Conv2dSplit[tt](256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), input_shape=torch.Size([6, 256, 29, 50]), output_shape=torch.Size([6, 256, 29, 50]))
+      )
+    )
+  )
+  (pts_bbox_head): BEVFormerHead[tt](
+    (positional_encoding): LearnedPositionalEncoding(num_feats=128, row_num_embed=50, col_num_embed=50)
+    (transformer): PerceptionTransformer[tt](
+      (encoder): BEVFormerEncoder[tt](
+        (layers): ModuleList(
+          (0-2): 3 x BEVFormerLayer[tt](
+            (attentions): ModuleList(
+              (0): TemporalSelfAttention[tt](
+                (sampling_offsets): Linear[tt](in_features=512, out_features=128, bias=True)
+                (attention_weights): Linear[tt](in_features=512, out_features=64, bias=True)
+                (value_proj): Linear[tt](in_features=256, out_features=256, bias=True)
+                (output_proj): Linear[tt](in_features=256, out_features=256, bias=True)
+                (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+              )
+              (1): SpatialCrossAttention[tt](
+                (deformable_attention): MSDeformableAttention3D[tt](
+                  (sampling_offsets): Linear[tt](in_features=256, out_features=128, bias=True)
+                  (attention_weights): Linear[tt](in_features=256, out_features=64, bias=True)
+                  (value_proj): Linear[tt](in_features=256, out_features=256, bias=True)
+                  (add): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+                )
+                (output_proj): Linear[tt](in_features=256, out_features=256, bias=True)
+              )
+            )
+            (ffns): ModuleList(
+              (0): FFN[tt](
+                (activate): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+                (layers): Sequential(
+                  (0): Sequential(
+                    (0): Linear[tt](in_features=256, out_features=512, bias=True)
+                    (1): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+                  )
+                  (1): Linear[tt](in_features=512, out_features=256, bias=True)
+                )
+              )
+            )
+            (norms): ModuleList(
+              (0-2): 3 x LayerNorm[tt](normalized_shape=256, bias=True)
+            )
+          )
+        )
+      )
+      (decoder): DetectionTransformerDecoder[tt](
+        (layers): ModuleList(
+          (0-5): 6 x DetrTransformerDecoderLayer[tt](
+            (attentions): ModuleList(
+              (0): MultiheadAttention[tt](
+                (attn): MultiheadAttention_[tt](
+                  (out_proj): Linear[tt](in_features=256, out_features=256, bias=True)
+                )
+                (add): Add[tt](ttnn.add, package=ttnn.decorators.ttnn.add)
+                (add_): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+              )
+              (1): CustomMSDeformableAttention[tt](
+                (sampling_offsets): Linear[tt](in_features=256, out_features=64, bias=True)
+                (attention_weights): Linear[tt](in_features=256, out_features=32, bias=True)
+                (value_proj): Linear[tt](in_features=256, out_features=256, bias=True)
+                (output_proj): Linear[tt](in_features=256, out_features=256, bias=True)
+                (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+              )
+            )
+            (ffns): ModuleList(
+              (0): FFN[tt](
+                (activate): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+                (layers): Sequential(
+                  (0): Sequential(
+                    (0): Linear[tt](in_features=256, out_features=512, bias=True)
+                    (1): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+                  )
+                  (1): Linear[tt](in_features=512, out_features=256, bias=True)
+                )
+              )
+            )
+            (norms): ModuleList(
+              (0-2): 3 x LayerNorm[tt](normalized_shape=256, bias=True)
+            )
+          )
+        )
+      )
+      (reference_points): Linear[tt](in_features=256, out_features=3, bias=True)
+      (can_bus_mlp): Sequential(
+        (0): Linear[tt](in_features=18, out_features=128, bias=True)
+        (1): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+        (2): Linear[tt](in_features=128, out_features=256, bias=True)
+        (3): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+        (norm): LayerNorm[tt](normalized_shape=256, bias=True)
+      )
+    )
+    (cls_branches): ModuleList(
+      (0-5): 6 x Sequential(
+        (0): Linear[tt](in_features=256, out_features=256, bias=True)
+        (1): LayerNorm[tt](normalized_shape=256, bias=True)
+        (2): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+        (3): Linear[tt](in_features=256, out_features=256, bias=True)
+        (4): LayerNorm[tt](normalized_shape=256, bias=True)
+        (5): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+        (6): Linear[tt](in_features=256, out_features=10, bias=True)
+      )
+    )
+    (reg_branches): ModuleList(
+      (0-5): 6 x Sequential(
+        (0): Linear[tt](in_features=256, out_features=256, bias=True)
+        (1): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+        (2): Linear[tt](in_features=256, out_features=256, bias=True)
+        (3): Functional[tt](ttnn.relu, package=ttnn.decorators.ttnn.relu)
+        (4): Linear[tt](in_features=256, out_features=10, bias=True)
+      )
+    )
+    (bev_embedding): Embedding[tt](num_embeddings=2500, embedding_dim=256)
+    (query_embedding): Embedding[tt](num_embeddings=900, embedding_dim=512)
+    (adder): Add[tt](ttnn.add_, package=ttnn.decorators.ttnn.add_)
+  )
+)
