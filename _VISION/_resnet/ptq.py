@@ -51,6 +51,31 @@ from optimum.quanto import (
     qint8,
     quantization_map
 )
+
+
+from torch.ao.quantization import (
+    get_default_qconfig,
+    get_default_qconfig_mapping,
+    get_default_qat_qconfig,
+    default_per_channel_symmetric_qnnpack_qconfig,
+    QConfigMapping,
+    QConfig,
+    prepare,         
+    convert,
+    prepare_qat,
+    fake_quantize as fq,
+    HistogramObserver,
+    PerChannelMinMaxObserver,
+    MinMaxObserver,
+    default_per_channel_qconfig,
+    default_per_channel_weight_observer    
+)
+from torch.ao.quantization.quantize_fx import (
+    prepare_fx, 
+    convert_fx,
+    fuse_fx
+)
+
 from _quanto import _quantize, _requantize, _Calibration
 from aimet_torch.batch_norm_fold import fold_all_batch_norms
 def logger_enable(prefix=''):
@@ -68,13 +93,13 @@ def logger_enable(prefix=''):
 
 
 def eval(model, device, test_loader, prefix=''):
-    # model.to(device)
+    model.to(device)
     model.eval()
     metric = evaluate.load("accuracy")
     with torch.no_grad():
         for batch in tqdm(test_loader,desc='eval...'):
             data, target = batch["pixel_values"], batch["labels"]
-            # data= data.to(device)
+            data= data.to(device)
             output = model(data)
             if isinstance(output, QTensor):
                 output = output.dequantize()
@@ -90,7 +115,7 @@ def calibrate(model, device, dataloader, num=10000):
     iter =  min(math.ceil(num/dataloader.batch_size), dataloader.__len__())
     with torch.no_grad():
         for batch in tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating..."):
-            data = batch["pixel_values"][:32].to(device)
+            data = batch["pixel_values"].to(device)
             _ = model(data)
 
 
@@ -132,47 +157,47 @@ def main(args):
     if not EVAL : 
         model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
         dummy_input = torch.randn(1, 3, 224, 224)
-        fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
         processor = AutoImageProcessor.from_pretrained("microsoft/resnet-50")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-        from torch.ao.quantization import (
-            get_default_qconfig,
-            get_default_qat_qconfig,
-            default_per_channel_symmetric_qnnpack_qconfig,
-            QConfigMapping,
-            QConfig,
-            prepare,         
-            convert,
-            prepare_qat,
-            fake_quantize as fq,
-            HistogramObserver,
-            PerChannelMinMaxObserver,
-            MinMaxObserver,
-            default_per_channel_qconfig
-        )
-        from torch.ao.quantization.quantize_fx import (
-            prepare_fx, 
-            convert_fx,
-            fuse_fx
-        )
         model.eval()
-        qconfig = get_default_qconfig()
-        qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig).set_object_type(torch.nn.Conv2d, qconfig)
+        qconfig = QConfig(
+                activation=HistogramObserver.with_args(reduce_range=False,qscheme=torch.per_tensor_symmetric),
+                weight=default_per_channel_weight_observer,
+            )
+
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        model_ = prepare_fx(model,qconfig_mapping,dummy_input)
+        calibrate(model_,args.device,dataloader,1000)
         
+
+        # for node in model_.graph.nodes:
+        #     if not node.op == 'call_module': continue
+        #     if not node.target.startswith('activation_post'): continue
+        #     node_before = node.args[0]
+        #     node_after = node.users.keys()
+        #     obs = getattr(model_,node.target)
+        #     print(f'{node.target:20} min:{obs.min_val:2.4f} max:{obs.max_val:2.4f}')
+        #     print(f' - before : {node_before}')
+        #     print(f' - atfer  : {list(node_after)}')
+        #     print('-----------------------------------------')        
+                  
+        model_.to('cpu')
+        q_model = convert_fx(model_)  
+        jit_model = torch.jit.trace(q_model, dummy_input) 
+        # torch.jit.save(jit_model,'a.pt')
+        # jit_model2 = torch.jit.load('a.pt')
+
         
-        q_model = prepare_fx(model,qconfig_mapping,dummy_input)
-        calibrate(q_model,args.device,dataloader,100)
-        q_model.to('cpu')
-        model_ = convert_fx(q_model)        
-        generated_code = model_.code
-        with open("restored_model.py", "w") as f:
-            f.write(generated_code)
-        ipdb.set_trace()
-        eval(model_,args.device,dataloader)
-        ipdb.set_trace()
+        # with open("code_qmodel.py", "w") as f:
+        #     f.write(q_model.code)
+        # with open("code_jit.py", "w") as f:
+        #     f.write(jit_model.code)
+        
+        # eval(jit_model,args.device,dataloader)
+        # ipdb.set_trace()
         
         
         # weight 
@@ -180,8 +205,8 @@ def main(args):
         model.fc.weight().dequantize()
         model.fc.weight().q_per_channel_scales()
         model.fc.weight().q_per_channel_zero_points()
-        torch.ao.nn.quantized.modules.linear.Linear
-        # from torch.ao.nn.quantized import Linear as qlinear
+        
+        from torch.ao.nn.quantized import Linear as qlinear
 
         
 
