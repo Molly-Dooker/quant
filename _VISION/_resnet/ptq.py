@@ -54,8 +54,7 @@ from optimum.quanto import (
 
 
 from torch.fx import symbolic_trace, GraphModule
-from torch.ao.quantization import QConfigMapping
-from torch_config.myconfig import simple_qconfig_mapping
+from torch_config.myconfig import simple_qconfig_mapping, default_qconfig_mapping
 # from torch.ao.quantization import get_default_qconfig_mapping
 from torch.ao.quantization.quantize_fx import (
     prepare_fx, 
@@ -120,7 +119,7 @@ def main(args):
 
         model.eval()
 
-        model_ = prepare_fx(model,get_default_qconfig_mapping() , dummy_input)
+        model_ = prepare_fx(model,default_qconfig_mapping , dummy_input)
         calibrate(model_,args.device,dataloader,500)                  
         model_.to('cpu')
         q_model = convert_fx(model_)  

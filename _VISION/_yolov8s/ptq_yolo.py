@@ -28,6 +28,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx, 
     convert_fx,
 )
+from torch_config.myconfig import simple_qconfig_mapping, default_qconfig_mapping
 
 def eval(model, device, dataloader, size=640, prefix=''):    
     stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])

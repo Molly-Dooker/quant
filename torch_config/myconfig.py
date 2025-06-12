@@ -114,7 +114,7 @@ qconfig = QConfig(
 
 simple_qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig).set_object_type(ConvReLU2d,qconfig).set_object_type(ReLU,qconfig)
 
-dedault_qconfig_mapping = _get_default_qconfig_mapping(is_qat=False,backend='x86',version=0).set_object_type(torch.cat,None)
+default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=False,backend='x86',version=0).set_object_type(torch.cat,None)
 
 
 
