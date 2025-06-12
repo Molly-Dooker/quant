@@ -122,7 +122,7 @@ default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=False,backend='x86
 
 
 
-def save_graph(model, file_path = "model_graph.txt"):
+def save_graph(model, file_path = "model_graph"):
 
     # 표준 출력을 파일로 리디렉션합니다.
     with open(file_path, 'w') as f:
