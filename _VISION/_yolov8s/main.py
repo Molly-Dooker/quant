@@ -104,6 +104,7 @@ def main(args):
                 calibrate(model, args.device, dataloader)
         freeze(model)
         eval(model, args.device, dataloader, args.size, 'quantized') 
+        ipdb.set_trace()
         os.makedirs(args.saveroot,exist_ok=True)
         save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
         with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
@@ -128,7 +129,7 @@ def main(args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="yolo")
-    parser.add_argument("--prefix", type=str, default="YOLO_t")
+    parser.add_argument("--prefix", type=str, default="YOLO_tt")
     parser.add_argument("--model_name", type=str, default="yolov8s.pt")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
@@ -136,7 +137,7 @@ if __name__ == '__main__':
     parser.add_argument("--split", type=str, default='val')
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
+    parser.add_argument("--device", type=int, default=3, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
 

@@ -110,7 +110,9 @@ def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
     if not EVAL : 
-        model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
+        ipdb.set_trace()
+        # model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
+
         dummy_input = torch.randn(1, 3, 224, 224)
         processor = AutoImageProcessor.from_pretrained("microsoft/resnet-50")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
