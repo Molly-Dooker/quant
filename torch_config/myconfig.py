@@ -33,6 +33,8 @@ _FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
     "sigmoid": default_fixed_qparams_range_0to1_observer,
     "sigmoid_": default_fixed_qparams_range_0to1_observer,
     torch.nn.Softmax: default_fixed_qparams_range_0to1_observer,
+    torch.nn.functional.softmax: default_fixed_qparams_range_0to1_observer,
+    "softmax": default_fixed_qparams_range_0to1_observer,
     torch.nn.Tanh: default_fixed_qparams_range_neg1to1_observer,
     torch.tanh: default_fixed_qparams_range_neg1to1_observer,
     "tanh": default_fixed_qparams_range_neg1to1_observer,
@@ -78,6 +80,8 @@ def _get_default_qconfig_mapping(
         QConfigMapping()
         .set_global(qconfig)
         .set_object_type("reshape", default_reuse_input_qconfig)
+        .set_object_type("view", default_reuse_input_qconfig)
+        .set_object_type("transpose", default_reuse_input_qconfig)
         .set_object_type(torch.nn.ConvTranspose1d, qconfig_transpose)
         .set_object_type(torch.nn.ConvTranspose2d, qconfig_transpose)
         .set_object_type(torch.nn.ConvTranspose3d, qconfig_transpose)

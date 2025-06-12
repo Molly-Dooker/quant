@@ -96,7 +96,7 @@ def main(args):
         
 
         dummy_input = torch.randn(1, 3, args.size, args.size)
-        model_ = prepare_fx(model,simple_qconfig_mapping,dummy_input)              
+        model_ = prepare_fx(model,default_qconfig_mapping,dummy_input)              
         calibrate(model_, args.device, dataloader,500)
         model_.to('cpu')
         q_model = convert_fx(model_)  
