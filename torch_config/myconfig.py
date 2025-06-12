@@ -1,6 +1,6 @@
 import torch
 from torch.nn import ReLU
-from torch.ao.nn.intrinsic.modules.fused import ConvReLU2d
+from torch.ao.nn.intrinsic.modules.fused import ConvReLU2d, ConvBnReLU2d
 from typing import Any, Callable, Dict, Union
 from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization import (
@@ -17,7 +17,10 @@ from torch.ao.quantization import (
     default_weight_fake_quant,
     default_weight_observer,
     default_fixed_qparams_range_0to1_observer,
-    default_fixed_qparams_range_neg1to1_observer        
+    default_fixed_qparams_range_neg1to1_observer,
+    FusedMovingAvgObsFakeQuantize,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver  
 )
 
 import contextlib
@@ -40,8 +43,6 @@ _FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
     "tanh_": default_fixed_qparams_range_neg1to1_observer,
 }
 
-
-
 def _get_default_qconfig_mapping(
     is_qat: bool, backend: str, version: int
 ) -> QConfigMapping:
@@ -49,7 +50,25 @@ def _get_default_qconfig_mapping(
     Return the default QConfigMapping for the given quantization type and backend.
     """
     if is_qat:
-        qconfig = get_default_qat_qconfig(backend, version)
+        # backend = 1 version = 'x86'        
+        qconfig = QConfig(
+            activation=FusedMovingAvgObsFakeQuantize.with_args(
+                observer=MovingAverageMinMaxObserver.with_args(qscheme=torch.per_tensor_symmetric),
+                quant_min=0,
+                quant_max=255,
+                reduce_range=False,
+                dtype=torch.quint8,
+                qscheme=torch.per_tensor_symmetric
+            ),
+            weight=FusedMovingAvgObsFakeQuantize.with_args(
+                observer=MovingAveragePerChannelMinMaxObserver,
+                quant_min=-128,
+                quant_max=127,
+                dtype=torch.qint8,
+                qscheme=torch.per_channel_symmetric,
+                ),
+        )
+        
     else:
         # this is difference
         qconfig = QConfig(
@@ -111,15 +130,26 @@ def _get_default_qconfig_mapping(
     return qconfig_mapping
 
 qconfig = QConfig(
-    activation=HistogramObserver.with_args(reduce_range=False,qscheme=torch.per_tensor_symmetric),
-    weight=default_per_channel_weight_observer)
+    activation=FusedMovingAvgObsFakeQuantize.with_args(
+        observer=MovingAverageMinMaxObserver.with_args(qscheme=torch.per_tensor_symmetric),
+        quant_min=0,
+        quant_max=255,
+        reduce_range=False,
+        dtype=torch.quint8,
+        qscheme=torch.per_tensor_symmetric
+    ),
+    weight=FusedMovingAvgObsFakeQuantize.with_args(
+        observer=MovingAveragePerChannelMinMaxObserver,
+        quant_min=-128,
+        quant_max=127,
+        dtype=torch.qint8,
+        qscheme=torch.per_channel_symmetric,
+        ),
+)
 
-
-simple_qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig).set_object_type(ConvReLU2d,qconfig).set_object_type(ReLU,qconfig)
-
-default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=False,backend='x86',version=0).set_object_type(torch.cat,None)
-
-
+simple_qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig).set_object_type(ReLU,qconfig).set_object_type(torch.nn.BatchNorm2d,qconfig)
+default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=True,backend='x86',version=1).set_object_type(torch.cat,None)
+# default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=False,backend='x86',version=0).set_object_type(torch.cat,None)
 
 
 

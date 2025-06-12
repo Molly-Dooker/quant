@@ -1,12 +1,9 @@
 import argparse
 import sys
-import json
 import itertools
 import math
 import ipdb
-import os
 from loguru import logger
-import torch.ao.quantization
 from tqdm import tqdm
 from _util import ipdb_sys_excepthook, keyword_to_itype, transform
 import torchvision
@@ -26,12 +23,6 @@ from torch.quantization import (
     prepare_qat,
     convert,
 )
-import torch.quantization as tq
-from torch.ao.quantization._learnable_fake_quantize import (
-    _LearnableFakeQuantize as LearnableFakeQuantize,
-)
-from torch.fx import symbolic_trace, GraphModule
-from torch.ao.quantization import QuantStub, DeQuantStub
 
 import evaluate
 from accelerate import init_empty_weights
@@ -111,22 +102,24 @@ def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
     if not EVAL : 
-        filename = 'resnet18_Opset16.onnx'
-        model = onnx.load_model(filename)
-        # session = ort.InferenceSession(model.SerializeToString(),providers=)
         
-
-        
-        
-        # model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
-
-        dummy_input = torch.randn(1, 3, 224, 224)
         processor = AutoImageProcessor.from_pretrained("microsoft/resnet-50")
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+        dummy_input = torch.randn(1, 3, 224, 224)
+
+
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        provider_options = [
+            {'device_id': 5},  # CUDAExecutionProvider에 대한 옵션
+            {}
+            ]
+        
+        filename = 'resnet18_Opset16.onnx'
+        model = onnx.load_model(filename)
+        session = ort.InferenceSession(model.SerializeToString(),providers=providers,provider_options=provider_options)
         ipdb.set_trace()
-        # # model.eval()
 
         # model_ = prepare_fx(model,default_qconfig_mapping , dummy_input)
         # calibrate(model_,args.device,dataloader,500)                  
