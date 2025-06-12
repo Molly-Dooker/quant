@@ -7,7 +7,7 @@ from tqdm import tqdm
 import argparse
 import json
 import os
-
+from typing import Any, Callable, Dict, List, Tuple, Union
 import torch
 from datasets import load_dataset
 from ultralytics import YOLO
@@ -23,10 +23,11 @@ from _quanto import _quantize, _requantize, _Calibration
 from _util import class_names, keyword_to_itype, update_stats
 from _yolov8s import Yolov8s
 from _dataloader import Processor, transform, custom_collate_fn
-
-
-
-        
+from torch.fx import symbolic_trace, GraphModule
+from torch.ao.quantization.quantize_fx import (
+    prepare_fx, 
+    convert_fx,
+)
 
 def eval(model, device, dataloader, size=640, prefix=''):    
     stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -75,6 +76,7 @@ def logger_enable(prefix=''):
     logger.add("_logs/log", rotation="500 MB", level="INFO", format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
+from torch_config import myconfig
 def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
@@ -84,13 +86,23 @@ def main(args):
         yolo =  YOLO(args.model_name)
         yolo.fuse()
         yolo.eval()
-        ipdb.set_trace()
-
+        
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         processor = Processor(new_shape=(args.size, args.size))
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)
-        model = Yolov8s(yolo.model.model, args.size)
+        model = Yolov8s(yolo.model.model, args.size).eval()
+        
+        qconfig_mapping = get_default_qconfig_mapping()
+        dummy_input = torch.randn(1, 3, args.size, args.size)
+        model_ = prepare_fx(model,qconfig_mapping,dummy_input)              
+        calibrate(model_, args.device, dataloader,500)
+        model_.to('cpu')
+        q_model = convert_fx(model_)  
+        jit_model = torch.jit.trace(q_model, dummy_input) 
+        eval(jit_model, 'cpu', dataloader, args.size, 'quantized') 
+
+
         # base model evaluation
         if args.default: eval(model, args.device, dataloader, processor, 'default')
         weights = keyword_to_itype(args.weights)

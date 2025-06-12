@@ -53,31 +53,17 @@ from optimum.quanto import (
 )
 
 
+from torch.fx import symbolic_trace, GraphModule
+
 from torch.ao.quantization import (
-    get_default_qconfig,
-    get_default_qconfig_mapping,
-    get_default_qat_qconfig,
-    default_per_channel_symmetric_qnnpack_qconfig,
-    QConfigMapping,
-    QConfig,
-    prepare,         
-    convert,
-    prepare_qat,
-    fake_quantize as fq,
-    HistogramObserver,
-    PerChannelMinMaxObserver,
-    MinMaxObserver,
-    default_per_channel_qconfig,
-    default_per_channel_weight_observer    
+    get_default_qconfig_mapping
 )
+
 from torch.ao.quantization.quantize_fx import (
     prepare_fx, 
     convert_fx,
-    fuse_fx
 )
-
 from _quanto import _quantize, _requantize, _Calibration
-from aimet_torch.batch_norm_fold import fold_all_batch_norms
 def logger_enable(prefix=''):
     def console_filter(record):
         # extra에 file_only가 True인 경우 콘솔 출력 제외
@@ -119,38 +105,6 @@ def calibrate(model, device, dataloader, num=10000):
             _ = model(data)
 
 
-
-
-act_observer = MovingAverageMinMaxObserver.with_args(
-    quant_min=-128, quant_max=127,
-    dtype=torch.qint8,
-    qscheme=torch.per_tensor_symmetric
-)
-wt_observer = MovingAveragePerChannelMinMaxObserver.with_args(
-    quant_min=-128, quant_max=127,
-    dtype=torch.qint8,
-    qscheme=torch.per_channel_symmetric
-)
-
-learnable_act = LearnableFakeQuantize.with_args(
-    ovserver = act_observer,
-    quant_min=-128,
-    quant_max=127,
-    dtype=torch.qint8,
-    use_grad_scaling=True,
-)
-
-
-learnable_wt = LearnableFakeQuantize.with_args(
-    ovserver = wt_observer,
-    quant_min=-128,
-    quant_max=127,
-    dtype=torch.qint8,
-    use_grad_scaling=True,
-)
-
-
-
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
@@ -163,41 +117,14 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
         model.eval()
-        qconfig = QConfig(
-                activation=HistogramObserver.with_args(reduce_range=False,qscheme=torch.per_tensor_symmetric),
-                weight=default_per_channel_weight_observer,
-            )
-
-        qconfig_mapping = QConfigMapping().set_global(qconfig)
-        model_ = prepare_fx(model,qconfig_mapping,dummy_input)
-        calibrate(model_,args.device,dataloader,1000)
-        
-
-        # for node in model_.graph.nodes:
-        #     if not node.op == 'call_module': continue
-        #     if not node.target.startswith('activation_post'): continue
-        #     node_before = node.args[0]
-        #     node_after = node.users.keys()
-        #     obs = getattr(model_,node.target)
-        #     print(f'{node.target:20} min:{obs.min_val:2.4f} max:{obs.max_val:2.4f}')
-        #     print(f' - before : {node_before}')
-        #     print(f' - atfer  : {list(node_after)}')
-        #     print('-----------------------------------------')        
+        model_ = prepare_fx(model,,dummy_input)
+        calibrate(model_,args.device,dataloader,500)
                   
         model_.to('cpu')
         q_model = convert_fx(model_)  
+        ipdb.set_trace()
         jit_model = torch.jit.trace(q_model, dummy_input) 
-        # torch.jit.save(jit_model,'a.pt')
-        # jit_model2 = torch.jit.load('a.pt')
 
-        
-        # with open("code_qmodel.py", "w") as f:
-        #     f.write(q_model.code)
-        # with open("code_jit.py", "w") as f:
-        #     f.write(jit_model.code)
-        
-        # eval(jit_model,args.device,dataloader)
-        # ipdb.set_trace()
         
         
         # weight 
