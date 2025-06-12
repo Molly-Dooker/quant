@@ -20,6 +20,8 @@ from torch.ao.quantization import (
     default_fixed_qparams_range_neg1to1_observer        
 )
 
+import contextlib
+
 
 _FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
     torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
@@ -117,6 +119,16 @@ simple_qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear,qconfi
 default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=False,backend='x86',version=0).set_object_type(torch.cat,None)
 
 
+
+
+
+def save_graph(model, file_path = "model_graph.txt"):
+
+    # 표준 출력을 파일로 리디렉션합니다.
+    with open(file_path, 'w') as f:
+        with contextlib.redirect_stdout(f):
+            # 이 블록 안에서의 print() 또는 stdout 출력은 모두 파일 'f'에 기록됩니다.
+            model.graph.print_tabular()
 
 
 # for node in model_.graph.nodes:
