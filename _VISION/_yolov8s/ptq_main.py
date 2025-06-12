@@ -93,7 +93,7 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)
         model = Yolov8s(yolo.model.model, args.size).eval()
         
-        qconfig_mapping = get_default_qconfig_mapping()
+
         dummy_input = torch.randn(1, 3, args.size, args.size)
         model_ = prepare_fx(model,qconfig_mapping,dummy_input)              
         calibrate(model_, args.device, dataloader,500)

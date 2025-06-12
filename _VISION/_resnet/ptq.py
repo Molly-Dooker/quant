@@ -54,11 +54,9 @@ from optimum.quanto import (
 
 
 from torch.fx import symbolic_trace, GraphModule
-
-from torch.ao.quantization import (
-    get_default_qconfig_mapping
-)
-
+from torch.ao.quantization import QConfigMapping
+from torch_config.myconfig import simple_qconfig_mapping
+# from torch.ao.quantization import get_default_qconfig_mapping
 from torch.ao.quantization.quantize_fx import (
     prepare_fx, 
     convert_fx,
@@ -105,6 +103,10 @@ def calibrate(model, device, dataloader, num=10000):
             _ = model(data)
 
 
+
+
+
+
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
@@ -117,12 +119,13 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
         model.eval()
-        model_ = prepare_fx(model,,dummy_input)
-        calibrate(model_,args.device,dataloader,500)
-                  
+
+        model_ = prepare_fx(model,get_default_qconfig_mapping() , dummy_input)
+        calibrate(model_,args.device,dataloader,500)                  
         model_.to('cpu')
         q_model = convert_fx(model_)  
         ipdb.set_trace()
+
         jit_model = torch.jit.trace(q_model, dummy_input) 
 
         
