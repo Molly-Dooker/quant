@@ -103,14 +103,21 @@ def calibrate(model, device, dataloader, num=10000):
 
 
 
-
-
+import onnxruntime as ort
+from onnxsim import simplify
+import onnx
 
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
     if not EVAL : 
-        ipdb.set_trace()
+        filename = 'resnet18_Opset16.onnx'
+        model = onnx.load_model(filename)
+        # session = ort.InferenceSession(model.SerializeToString(),providers=)
+        
+
+        
+        
         # model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
 
         dummy_input = torch.randn(1, 3, 224, 224)
@@ -118,26 +125,26 @@ def main(args):
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-
-        model.eval()
-
-        model_ = prepare_fx(model,default_qconfig_mapping , dummy_input)
-        calibrate(model_,args.device,dataloader,500)                  
-        model_.to('cpu')
-        q_model = convert_fx(model_)  
         ipdb.set_trace()
+        # # model.eval()
 
-        jit_model = torch.jit.trace(q_model, dummy_input) 
+        # model_ = prepare_fx(model,default_qconfig_mapping , dummy_input)
+        # calibrate(model_,args.device,dataloader,500)                  
+        # model_.to('cpu')
+        # q_model = convert_fx(model_)  
+        # ipdb.set_trace()
+
+        # jit_model = torch.jit.trace(q_model, dummy_input) 
 
         
         
-        # weight 
-        model.fc.weight().int_repr()
-        model.fc.weight().dequantize()
-        model.fc.weight().q_per_channel_scales()
-        model.fc.weight().q_per_channel_zero_points()
+        # # weight 
+        # model.fc.weight().int_repr()
+        # model.fc.weight().dequantize()
+        # model.fc.weight().q_per_channel_scales()
+        # model.fc.weight().q_per_channel_zero_points()
         
-        from torch.ao.nn.quantized import Linear as qlinear
+        # from torch.ao.nn.quantized import Linear as qlinear
 
         
 
