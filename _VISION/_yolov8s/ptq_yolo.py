@@ -96,10 +96,11 @@ def main(args):
         
 
         dummy_input = torch.randn(1, 3, args.size, args.size)
-        model_ = prepare_fx(model,qconfig_mapping,dummy_input)              
+        model_ = prepare_fx(model,simple_qconfig_mapping,dummy_input)              
         calibrate(model_, args.device, dataloader,500)
         model_.to('cpu')
         q_model = convert_fx(model_)  
+        ipdb.set_trace()
         jit_model = torch.jit.trace(q_model, dummy_input) 
         eval(jit_model, 'cpu', dataloader, args.size, 'quantized') 
 
