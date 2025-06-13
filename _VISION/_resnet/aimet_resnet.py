@@ -106,6 +106,134 @@ import onnx
 from aimet_onnx.batch_norm_fold import fold_all_batch_norms_to_weight
 from aimet_common.defs import QuantScheme
 from aimet_onnx.quantsim import QuantizationSimModel
+from copy import deepcopy
+from aimet_common.onnx._utils import _add_onnx_qdq_nodes
+from aimet_common.defs import QuantScheme, QuantizationDataType
+
+def _to_onnx_qdq(sim) -> onnx.ModelProto:
+    """
+    Return a copy of ModelProto with all QcQuantizeOp replaced with
+    onnx::QuantizeLinear and/or DequantizeLinear
+    """
+    onnx_opset_version = next(
+        opset.version for opset in sim.model.opset_import() if opset.domain == ""
+    )
+
+    desired_onnx_opset_version = onnx_opset_version
+
+    if onnx_opset_version < 10:
+        desired_onnx_opset_version = 10
+
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear are only supported in opset >= 10;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    if onnx_opset_version < 13 and any(
+        qtzr.quant_info.usePerChannelMode
+        and qtzr.tensor_quantizer_params
+        and qtzr.tensor_quantizer_params.channel_axis is not None
+        for qtzr in sim.qc_quantize_op_dict.values()
+    ):
+        desired_onnx_opset_version = 13
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear with per-channel are only supported in opset >= 13;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    if onnx_opset_version < 21 and any(
+        qtzr.quant_info.usePerChannelMode
+        and qtzr.tensor_quantizer_params
+        and qtzr.quant_info.blockSize > 0
+        for qtzr in sim.qc_quantize_op_dict.values()
+    ):
+        desired_onnx_opset_version = 21
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear with per-block are only supported in opset >= 21;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    if onnx_opset_version < 21 and any(
+        qtzr.data_type == QuantizationDataType.int and 8 < qtzr.bitwidth <= 16
+        for qtzr in sim.qc_quantize_op_dict.values()
+    ):
+        desired_onnx_opset_version = 21
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear with INT16 are only supported in opset >= 21;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    model_copy = onnx.ModelProto()
+    model_copy.CopyFrom(sim.model.model)
+
+    sim._overwrite_parameters(model_copy, sim._get_qdq_parameters())
+
+    aimet_qc_quantize_nodes = [
+        node
+        for node in model_copy.graph.node
+        if node.op_type == "QcQuantizeOp"
+        and node.domain in ("aimet.customop.cpu", "aimet.customop.cuda")
+    ]
+
+    qdq_node_info = {
+        "input_names": [],
+        "output_names": [],
+        "node_name_prefixes": [],
+        "encodings": [],
+    }
+
+    for aimet_node in aimet_qc_quantize_nodes:
+        qtzr = sim.qc_quantize_op_dict[aimet_node.input[0]]
+        encodings = qtzr._export_2_0_0_encodings()  # pylint: disable=protected-access
+
+        if encodings:
+            # Affine quantizer
+            # Replace QcQuantizeOp with onnx::QuantizeLinear and DequantizeLinear
+            qdq_node_info["input_names"].append(aimet_node.input[0])
+            qdq_node_info["output_names"].append(aimet_node.output[0])
+            qdq_node_info["node_name_prefixes"].append(aimet_node.name)
+            qdq_node_info["encodings"].append(encodings)
+
+    graph_output_names = [out.name for out in model_copy.graph.output]
+    sim.remove_quantizers(model_copy)
+
+    if onnx_opset_version < desired_onnx_opset_version:
+        model_copy = onnx.version_converter.convert_version(
+            model_copy, desired_onnx_opset_version
+        )
+
+    _add_onnx_qdq_nodes(
+        model_copy, **qdq_node_info, onnx_opset=desired_onnx_opset_version
+    )
+
+    # Graph output could have been renamed during self.remove_quantizers.
+    # Restore the original output names
+    q_input_names = set(
+        node.input[0]
+        for node in model_copy.graph.node
+        if node.op_type == "QuantizeLinear"
+    )
+    dq_output_names = set(
+        node.output[0]
+        for node in model_copy.graph.node
+        if node.op_type == "DequantizeLinear"
+    )
+    for out, orig_name in zip(model_copy.graph.output, graph_output_names):
+        if out.name in q_input_names and orig_name in dq_output_names:
+            out.name = orig_name
+
+    # TODO: Unfortunately, this sanity check doesn't pass yet because the
+    #       QcQuantizeOp nodes inserted during QuantizationSimModel.__init__
+    #       aren't topologically sorted, but onnx.checker asserts topological
+    #       order of all nodes. Needs to be fixed asap.
+    # onnx.checker.check_model(model_copy, True)
+    return model_copy
+
+
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
@@ -115,17 +243,13 @@ def main(args):
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-        dummy_input = torch.randn(1, 3, 224, 224)
-        
-
-      
-        
-
+        dummy_input = torch.randn(1, 3, 224, 224)           
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
         filename = 'resnet18.onnx'
         model = onnx.load_model(filename)
-        
+        # eval(session,dataloader,args.prefix)
+
 
         root = f'output/{args.prefix}/'
         
@@ -149,77 +273,19 @@ def main(args):
                                 providers=providers,
                                 config_file='_custom_config.json')
 
-
-
-
-        # with open(root+'graph.graph', "w") as f:
-        #     f.write(str(sim.model.model.graph))
             
         sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
                             forward_pass_callback_args=1000)
-
         
-        # eval(sim.session,dataloader,args.prefix)
-        sim.export(path=root, filename_prefix='qq')       
+        qdq_model = _to_onnx_qdq(sim)
+        with open(root+'graph_qdq.graph', "w") as f:
+            f.write(str(qdq_model.graph.node))
+
+        qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)
         
-
-        # ipdb.set_trace()
-        # for name, quantizer_op in sim.qc_quantize_op_dict.items():
-        #     encodings = quantizer_op.get_encodings()
-        #     if not encodings: continue            
-        #     encoding = encodings[0]
-        #     print(name)
-        #     if name =='/act1/Relu_output_0': break
-
-            
-        #     # 이름 규칙으로 타입 추론
-        #     if 'weight' in name or 'bias' in name or name.startswith('onnx::'):
-        #         quantizer_type = 'PARAM (inferred)'
-        #     else:
-        #         quantizer_type = 'ACTIVATION (inferred)'
-
-        #     print(f"Quantizer Node Name: {name} ({quantizer_type})")
-
-        #     # .scale 대신 .delta 속성을 사용합니다.
-        #     # .offset, .min, .max 등은 그대로 사용합니다.
-        #     scale_to_print = encoding.delta[0] if isinstance(encoding.delta, list) else encoding.delta
-        #     offset_to_print = encoding.offset[0] if isinstance(encoding.offset, list) else encoding.offset
-
-        #     print(f"  - Scale (delta): {scale_to_print:.8f}")
-        #     print(f"  - Offset(ZP)   : {offset_to_print}")
-        #     print(f"  - Min          : {encoding.min:.4f}")
-        #     print(f"  - Max          : {encoding.max:.4f}")
-            
-        #     # .dtype 속성이 TfEncoding 객체에 없을 수 있으므로, 오류 방지를 위해 getattr 사용
-        #     dtype_str = getattr(encoding, 'dtype', 'N/A')
-        #     print(f"  - DType        : {dtype_str}")
-        #     print("-" * 20)
+        eval(qdq_session,dataloader,'dd')
 
 
-        
-        
-        # onnx.save(model,'resnet18_simple.onnx')
-                    
-
-
-
-        # model_ = prepare_fx(model,default_qconfig_mapping , dummy_input)
-        # calibrate(model_,args.device,dataloader,500)                  
-        # model_.to('cpu')
-        # q_model = convert_fx(model_)  
-        # ipdb.set_trace()
-
-        # jit_model = torch.jit.trace(q_model, dummy_input) 
-
-        
-        
-        # # weight 
-        # model.fc.weight().int_repr()
-        # model.fc.weight().dequantize()
-        # model.fc.weight().q_per_channel_scales()
-        # model.fc.weight().q_per_channel_zero_points()
-        
-        # from torch.ao.nn.quantized import Linear as qlinear
 
         
 
