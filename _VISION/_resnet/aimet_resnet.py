@@ -152,14 +152,14 @@ def main(args):
 
 
 
-        with open(root+'graph.graph', "w") as f:
-            f.write(str(sim.model.model.graph))
+        # with open(root+'graph.graph', "w") as f:
+        #     f.write(str(sim.model.model.graph))
             
         sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
                             forward_pass_callback_args=1000)
 
         
-        eval(sim.session,dataloader,args.prefix)
+        # eval(sim.session,dataloader,args.prefix)
         sim.export(path=root, filename_prefix='qq')       
         
 

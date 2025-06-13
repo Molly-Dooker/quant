@@ -2,11 +2,12 @@ import onnx
 import numpy as np
 import json
 import os
-
+import argparse
 def create_qdq_onnx_model(
     original_model_path: str,
     encoding_path: str,
-    output_model_path: str
+    output_model_path: str,
+    root:str
 ):
     """
     원본 ONNX 모델과 인코딩 파일을 사용하여 수동으로 QDQ 형식의 ONNX 모델을 생성합니다.
@@ -131,19 +132,28 @@ def create_qdq_onnx_model(
         onnx.checker.check_model(model)
         print("   - 모델 검증 성공!")
         onnx.save(model, output_model_path)
+        with open(root+'graph_qdq.graph', "w") as f:
+            f.write(str(model.graph.node))
         print(f"   - 최종 QDQ 모델이 '{output_model_path}'에 성공적으로 저장되었습니다.")
     except onnx.checker.ValidationError as e:
         print(f"   - 모델 검증 실패: {e}")
 
 if __name__ == '__main__':
-    # --- 파일 경로 설정 ---
-    ORIGINAL_MODEL_PATH = "qq.onnx"
-    ENCODING_PATH = "qq.encodings"
-    OUTPUT_QDQ_MODEL_PATH = "resnet18_manual_qdq_final.onnx"
 
+    parser = argparse.ArgumentParser(description="resnet")
+    parser.add_argument("--prefix", type=str, default="aa")
+    args = parser.parse_args()
+
+    # --- 파일 경로 설정 ---
+    root = f'output/{args.prefix}/'
+    ORIGINAL_MODEL_PATH = f'output/{args.prefix}/qq.onnx'
+    ENCODING_PATH = f'output/{args.prefix}/qq.encodings'
+    OUTPUT_QDQ_MODEL_PATH = f'output/{args.prefix}/resnet18_manual_qdq_final.onnx'
+    
     # 스크립트 실행
     create_qdq_onnx_model(
         original_model_path=ORIGINAL_MODEL_PATH,
         encoding_path=ENCODING_PATH,
-        output_model_path=OUTPUT_QDQ_MODEL_PATH
+        output_model_path=OUTPUT_QDQ_MODEL_PATH,
+        root = root
     )
