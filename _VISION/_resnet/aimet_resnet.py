@@ -23,7 +23,7 @@ from torch.quantization import (
     prepare_qat,
     convert,
 )
-
+import numpy as np
 import evaluate
 from accelerate import init_empty_weights
 from datasets import load_dataset
@@ -42,7 +42,7 @@ from optimum.quanto import (
     qint8,
     quantization_map
 )
-
+import os
 
 from torch.fx import symbolic_trace, GraphModule
 from torch_config.myconfig import simple_qconfig_mapping, default_qconfig_mapping
@@ -66,38 +66,46 @@ def logger_enable(prefix=''):
 
 
 
-def eval(model, device, test_loader, prefix=''):
-    model.to(device)
-    model.eval()
+def eval(model, test_loader, prefix=''):
+
+    input_name = model.get_inputs()[0].name
+    output_names = [output.name for output in model.get_outputs()]
+
     metric = evaluate.load("accuracy")
-    with torch.no_grad():
-        for batch in tqdm(test_loader,desc='eval...'):
-            data, target = batch["pixel_values"], batch["labels"]
-            data= data.to(device)
-            output = model(data)
-            if isinstance(output, QTensor):
-                output = output.dequantize()
-            output = output.argmax(-1).cpu()
-            metric.add_batch(predictions=output,references=target)
+
+    for batch in tqdm(test_loader,desc='eval...'):
+        data, target = batch["pixel_values"].numpy(), batch["labels"].numpy()
+        output = model.run(output_names,{input_name: data})[0]
+        output = output.argmax(-1)
+        metric.add_batch(predictions=output,references=target)
 
     acc = metric.compute()['accuracy']
     logger.info(f'{prefix} model acc : {acc*100:.2f}%')
 
-def calibrate(model, device, dataloader, num=10000):
-    model.to(device)
-    model.eval()
-    iter =  min(math.ceil(num/dataloader.batch_size), dataloader.__len__())
-    with torch.no_grad():
-        for batch in tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating..."):
-            data = batch["pixel_values"].to(device)
-            _ = model(data)
+def calibrate(model, dataloader, samples=1000):
+    input_name = model.get_inputs()[0].name
+    output_names = [output.name for output in model.get_outputs()]
+    iter =  min(math.ceil(samples/dataloader.batch_size), dataloader.__len__())
+    for batch in tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating..."):
+        data = batch["pixel_values"].numpy()
+        output = model.run(output_names,{input_name: data})[0]
+
+def calibrate_wrapper(model, samples, dataloader):
+    calibrate(model,dataloader,samples)
+
+    
+    
+    
+    
 
 
 
 import onnxruntime as ort
 from onnxsim import simplify
 import onnx
-
+from aimet_onnx.batch_norm_fold import fold_all_batch_norms_to_weight
+from aimet_common.defs import QuantScheme
+from aimet_onnx.quantsim import QuantizationSimModel
 def main(args):
     logger_enable(args.prefix)
     EVAL = args.eval
@@ -108,18 +116,55 @@ def main(args):
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
         dummy_input = torch.randn(1, 3, 224, 224)
+        
 
+      
+        
 
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-        provider_options = [
-            {'device_id': 5},  # CUDAExecutionProvider에 대한 옵션
-            {}
-            ]
-        
-        filename = 'resnet18_Opset16.onnx'
+
+        filename = 'resnet18.onnx'
         model = onnx.load_model(filename)
-        session = ort.InferenceSession(model.SerializeToString(),providers=providers,provider_options=provider_options)
-        ipdb.set_trace()
+        
+        try:
+            model, _ = simplify(model)
+        except:
+            print('ONNX Simplifier failed. Proceeding with unsimplified model')
+        # ipdb.set_trace()
+        # session = ort.InferenceSession(model.SerializeToString(),providers=providers)
+
+
+
+        # eval(session,dataloader,args.prefix)
+        # _ = fold_all_batch_norms_to_weight(model)
+
+
+        sim = QuantizationSimModel(model=model,
+                                quant_scheme=QuantScheme.post_training_tf_enhanced,
+                                default_activation_bw=8,
+                                default_param_bw=8,
+                                providers=providers,
+                                config_file='_custom_config.json')
+
+
+        root = 'output/dd/'
+        os.makedirs(root,exist_ok=True)
+
+        with open(root+'graph.txt', "w") as f:
+            f.write(str(sim.model.model.graph))
+            
+        sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
+                            forward_pass_callback_args=500)
+        sim.export(path=root, filename_prefix='qq')
+
+
+
+        
+        
+        # onnx.save(model,'resnet18_simple.onnx')
+                    
+
+
 
         # model_ = prepare_fx(model,default_qconfig_mapping , dummy_input)
         # calibrate(model_,args.device,dataloader,500)                  

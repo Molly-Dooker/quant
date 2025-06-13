@@ -11,5 +11,8 @@ wandb
 *.jpg
 *.jpeg
 *.onnx
+##
+*.graph
+*.encodings
 ## LLM
 sparse_logs
