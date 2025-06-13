@@ -278,12 +278,14 @@ def main(args):
                             forward_pass_callback_args=1000)
         
         qdq_model = _to_onnx_qdq(sim)
+        onnx.save(qdq_model,root+'qdq.onnx')
         with open(root+'graph_qdq.graph', "w") as f:
             f.write(str(qdq_model.graph.node))
-
-        qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)
         
-        eval(qdq_session,dataloader,'dd')
+        
+
+        # qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
+        # eval(qdq_session,dataloader,'dd')
 
 
 
