@@ -64,6 +64,8 @@ def logger_enable(prefix=''):
     logger = logger.bind(prefix=prefix)
 
 
+    
+
 
 
 def eval(model, test_loader, prefix=''):
@@ -92,8 +94,6 @@ def calibrate(model, dataloader, samples=1000):
 
 def calibrate_wrapper(model, samples, dataloader):
     calibrate(model,dataloader,samples)
-
-    
     
     
     
@@ -126,19 +126,22 @@ def main(args):
         filename = 'resnet18.onnx'
         model = onnx.load_model(filename)
         
+
+        root = f'output/{args.prefix}/'
+        
+        os.makedirs(root,exist_ok=True)
+        shutil.copyfile('_custom_config.json',root+'config.json')
+        
+        
+        with open(root+'graph.graph', "w") as f:
+            f.write(str(model.graph.node))
+        
         try:
             model, _ = simplify(model)
         except:
             print('ONNX Simplifier failed. Proceeding with unsimplified model')
-        # ipdb.set_trace()
         # session = ort.InferenceSession(model.SerializeToString(),providers=providers)
-
-
-
         # eval(session,dataloader,args.prefix)
-        # _ = fold_all_batch_norms_to_weight(model)
-
-
         sim = QuantizationSimModel(model=model,
                                 quant_scheme=QuantScheme.post_training_tf,
                                 default_activation_bw=8,
@@ -147,19 +150,50 @@ def main(args):
                                 config_file='_custom_config.json')
 
 
-        root = f'output/{args.prefix}/'
-        
-        os.makedirs(root,exist_ok=True)
-        shutil.copyfile('_custom_config.json',root+'congfig.json')
+
 
         with open(root+'graph.graph', "w") as f:
             f.write(str(sim.model.model.graph))
             
         sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
-                            forward_pass_callback_args=500)
-        ipdb.set_trace()
-        sim.export(path=root, filename_prefix='qq')
+                            forward_pass_callback_args=1000)
 
+        
+        eval(sim.session,dataloader,args.prefix)
+        sim.export(path=root, filename_prefix='qq')       
+        
+
+        # ipdb.set_trace()
+        # for name, quantizer_op in sim.qc_quantize_op_dict.items():
+        #     encodings = quantizer_op.get_encodings()
+        #     if not encodings: continue            
+        #     encoding = encodings[0]
+        #     print(name)
+        #     if name =='/act1/Relu_output_0': break
+
+            
+        #     # 이름 규칙으로 타입 추론
+        #     if 'weight' in name or 'bias' in name or name.startswith('onnx::'):
+        #         quantizer_type = 'PARAM (inferred)'
+        #     else:
+        #         quantizer_type = 'ACTIVATION (inferred)'
+
+        #     print(f"Quantizer Node Name: {name} ({quantizer_type})")
+
+        #     # .scale 대신 .delta 속성을 사용합니다.
+        #     # .offset, .min, .max 등은 그대로 사용합니다.
+        #     scale_to_print = encoding.delta[0] if isinstance(encoding.delta, list) else encoding.delta
+        #     offset_to_print = encoding.offset[0] if isinstance(encoding.offset, list) else encoding.offset
+
+        #     print(f"  - Scale (delta): {scale_to_print:.8f}")
+        #     print(f"  - Offset(ZP)   : {offset_to_print}")
+        #     print(f"  - Min          : {encoding.min:.4f}")
+        #     print(f"  - Max          : {encoding.max:.4f}")
+            
+        #     # .dtype 속성이 TfEncoding 객체에 없을 수 있으므로, 오류 방지를 위해 getattr 사용
+        #     dtype_str = getattr(encoding, 'dtype', 'N/A')
+        #     print(f"  - DType        : {dtype_str}")
+        #     print("-" * 20)
 
 
         
