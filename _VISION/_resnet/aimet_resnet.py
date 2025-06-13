@@ -99,7 +99,7 @@ def calibrate_wrapper(model, samples, dataloader):
     
 
 
-
+import shutil
 import onnxruntime as ort
 from onnxsim import simplify
 import onnx
@@ -140,21 +140,24 @@ def main(args):
 
 
         sim = QuantizationSimModel(model=model,
-                                quant_scheme=QuantScheme.post_training_tf_enhanced,
+                                quant_scheme=QuantScheme.post_training_tf,
                                 default_activation_bw=8,
                                 default_param_bw=8,
                                 providers=providers,
                                 config_file='_custom_config.json')
 
 
-        root = 'output/dd/'
+        root = f'output/{args.prefix}/'
+        
         os.makedirs(root,exist_ok=True)
+        shutil.copyfile('_custom_config.json',root+'congfig.json')
 
-        with open(root+'graph.txt', "w") as f:
+        with open(root+'graph.graph', "w") as f:
             f.write(str(sim.model.model.graph))
             
         sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
                             forward_pass_callback_args=500)
+        ipdb.set_trace()
         sim.export(path=root, filename_prefix='qq')
 
 
