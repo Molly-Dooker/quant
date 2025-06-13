@@ -233,6 +233,67 @@ def _to_onnx_qdq(sim) -> onnx.ModelProto:
     # onnx.checker.check_model(model_copy, True)
     return model_copy
 
+def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
+    """
+    생성된 QDQ 모델의 최종 출력에 불필요하게 붙은 QDQ 노드를 제거합니다.
+    :param qdq_model: QDQ 노드가 포함된 ONNX 모델
+    :return: 최종 출력 QDQ가 제거된 ONNX 모델
+    """
+    print("\n--- 최종 출력 QDQ 노드 제거 시작 ---")
+    graph = qdq_model.graph
+    
+    # 모델의 최종 출력 노드들을 찾기 (일반적으로 하나)
+    output_names = [output.name for output in graph.output]
+    
+    nodes_to_remove = []
+    
+    # Dequantize 노드부터 역순으로 탐색
+    for output_name in output_names:
+        # 최종 출력을 생성하는 Dequantize 노드를 찾음
+        final_dq_node = None
+        for node in graph.node:
+            if node.op_type == 'DequantizeLinear' and node.output[0] == output_name:
+                final_dq_node = node
+                break
+        
+        if not final_dq_node:
+            print(f"   - 출력 '{output_name}'에 연결된 DequantizeLinear 노드를 찾지 못했습니다. 건너뜁니다.")
+            continue
+            
+        # Dequantize 노드의 입력 텐서(Quantize 노드의 출력)를 찾음
+        quantized_tensor_name = final_dq_node.input[0]
+        
+        # 해당 텐서를 생성하는 Quantize 노드를 찾음
+        final_q_node = None
+        for node in graph.node:
+            if node.op_type == 'QuantizeLinear' and node.output[0] == quantized_tensor_name:
+                final_q_node = node
+                break
+        
+        if not final_q_node:
+            print(f"   - '{quantized_tensor_name}'를 생성하는 QuantizeLinear 노드를 찾지 못했습니다. 건너뜁니다.")
+            continue
+            
+        # 원본 텐서 이름 (최종 Gemm의 출력)
+        original_tensor_name = final_q_node.input[0]
+        print(f"   - 최종 출력 QDQ 쌍을 확인했습니다: ('{final_q_node.name}', '{final_dq_node.name}')")
+        print(f"   - 이 노드들을 제거하고, 최종 출력을 '{original_tensor_name}'로 변경합니다.")
+        
+        # 모델의 최종 출력을 QDQ 이전의 텐서로 변경
+        for out_val_info in graph.output:
+            if out_val_info.name == output_name:
+                out_val_info.name = original_tensor_name
+        
+        # 제거할 노드 목록에 추가
+        nodes_to_remove.extend([final_q_node, final_dq_node])
+    
+    # 실제 노드 제거
+    for node in nodes_to_remove:
+        graph.node.remove(node)
+        
+    print("--- 최종 출력 QDQ 노드 제거 완료 ---")
+    return qdq_model
+
 
 def main(args):
     logger_enable(args.prefix)
@@ -277,15 +338,19 @@ def main(args):
         sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
                             forward_pass_callback_args=1000)
         
-        qdq_model = _to_onnx_qdq(sim)
+        qdq_model_ = _to_onnx_qdq(sim)
+        qdq_model  = _remove_final_qdq(qdq_model_)
+        
+        qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
+        eval(qdq_session,dataloader,'dd')
+        
         onnx.save(qdq_model,root+'qdq.onnx')
         with open(root+'graph_qdq.graph', "w") as f:
             f.write(str(qdq_model.graph.node))
         
         
 
-        # qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
-        # eval(qdq_session,dataloader,'dd')
+
 
 
 
