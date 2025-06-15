@@ -110,6 +110,66 @@ from copy import deepcopy
 from aimet_common.onnx._utils import _add_onnx_qdq_nodes
 from aimet_common.defs import QuantScheme, QuantizationDataType
 
+
+def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
+    """
+    생성된 QDQ 모델의 최종 출력에 불필요하게 붙은 QDQ 노드와 관련 Initializer를 제거합니다.
+    :param qdq_model: QDQ 노드가 포함된 ONNX 모델
+    :return: 최종 출력 QDQ가 제거된 ONNX 모델
+    """
+    print("\n--- 최종 출력 QDQ 노드 및 관련 Initializer 제거 시작 ---")
+    graph = qdq_model.graph
+    
+    # 모델의 최종 출력 텐서 이름들을 복사해서 사용 (순회 중 변경될 수 있으므로)
+    original_output_names = [output.name for output in graph.output]
+    
+    nodes_to_remove = []
+    initializers_to_remove = set()
+
+    for output_name in original_output_names:
+        # 최종 출력을 생성하는 Dequantize 노드를 찾음
+        final_dq_node = next((n for n in graph.node if n.op_type == 'DequantizeLinear' and n.output[0] == output_name), None)
+        
+        if not final_dq_node:
+            continue
+            
+        quantized_tensor_name = final_dq_node.input[0]
+        final_q_node = next((n for n in graph.node if n.op_type == 'QuantizeLinear' and n.output[0] == quantized_tensor_name), None)
+        
+        if not final_q_node:
+            continue
+
+        original_tensor_name = final_q_node.input[0]
+        scale_name = final_q_node.input[1]
+        zp_name = final_q_node.input[2]
+        
+        print(f"   - 제거 대상 QDQ 쌍 확인: ('{final_q_node.name}', '{final_dq_node.name}')")
+        print(f"   - 제거 대상 Initializer 확인: ('{scale_name}', '{zp_name}')")
+        
+        # 모델의 최종 출력을 QDQ 이전의 텐서로 변경
+        for out_val_info in graph.output:
+            if out_val_info.name == output_name:
+                out_val_info.name = original_tensor_name
+        
+        nodes_to_remove.extend([final_q_node, final_dq_node])
+        initializers_to_remove.update([scale_name, zp_name])
+    
+    # 실제 노드 및 Initializer 제거
+    for node in nodes_to_remove:
+        graph.node.remove(node)
+    
+    # 제거 대상이 아닌 Initializer들만 남김
+    remaining_initializers = [init for init in graph.initializer if init.name not in initializers_to_remove]
+    graph.ClearField("initializer")
+    graph.initializer.extend(remaining_initializers)
+        
+    print("--- 노드 및 Initializer 제거 완료 ---")
+    return qdq_model
+
+
+
+
+
 def _to_onnx_qdq(sim) -> onnx.ModelProto:
     """
     Return a copy of ModelProto with all QcQuantizeOp replaced with
@@ -231,61 +291,7 @@ def _to_onnx_qdq(sim) -> onnx.ModelProto:
     #       aren't topologically sorted, but onnx.checker asserts topological
     #       order of all nodes. Needs to be fixed asap.
     # onnx.checker.check_model(model_copy, True)
-    return model_copy
-
-def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
-    """
-    생성된 QDQ 모델의 최종 출력에 불필요하게 붙은 QDQ 노드와 관련 Initializer를 제거합니다.
-    :param qdq_model: QDQ 노드가 포함된 ONNX 모델
-    :return: 최종 출력 QDQ가 제거된 ONNX 모델
-    """
-    print("\n--- 최종 출력 QDQ 노드 및 관련 Initializer 제거 시작 ---")
-    graph = qdq_model.graph
-    
-    # 모델의 최종 출력 텐서 이름들을 복사해서 사용 (순회 중 변경될 수 있으므로)
-    original_output_names = [output.name for output in graph.output]
-    
-    nodes_to_remove = []
-    initializers_to_remove = set()
-
-    for output_name in original_output_names:
-        # 최종 출력을 생성하는 Dequantize 노드를 찾음
-        final_dq_node = next((n for n in graph.node if n.op_type == 'DequantizeLinear' and n.output[0] == output_name), None)
-        
-        if not final_dq_node:
-            continue
-            
-        quantized_tensor_name = final_dq_node.input[0]
-        final_q_node = next((n for n in graph.node if n.op_type == 'QuantizeLinear' and n.output[0] == quantized_tensor_name), None)
-        
-        if not final_q_node:
-            continue
-
-        original_tensor_name = final_q_node.input[0]
-        scale_name = final_q_node.input[1]
-        zp_name = final_q_node.input[2]
-        
-        print(f"   - 제거 대상 QDQ 쌍 확인: ('{final_q_node.name}', '{final_dq_node.name}')")
-        print(f"   - 제거 대상 Initializer 확인: ('{scale_name}', '{zp_name}')")
-        
-        # 모델의 최종 출력을 QDQ 이전의 텐서로 변경
-        for out_val_info in graph.output:
-            if out_val_info.name == output_name:
-                out_val_info.name = original_tensor_name
-        
-        nodes_to_remove.extend([final_q_node, final_dq_node])
-        initializers_to_remove.update([scale_name, zp_name])
-    
-    # 실제 노드 및 Initializer 제거
-    for node in nodes_to_remove:
-        graph.node.remove(node)
-    
-    # 제거 대상이 아닌 Initializer들만 남김
-    remaining_initializers = [init for init in graph.initializer if init.name not in initializers_to_remove]
-    graph.ClearField("initializer")
-    graph.initializer.extend(remaining_initializers)
-        
-    print("--- 노드 및 Initializer 제거 완료 ---")
+    qdq_model = _remove_final_qdq(model_copy)
     return qdq_model
 
 
@@ -319,13 +325,11 @@ def main(args):
                                 default_param_bw=8,
                                 providers=providers,
                                 config_file='_custom_config.json')
-
             
         sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
                             forward_pass_callback_args=1000)
         
-        qdq_model_ = _to_onnx_qdq(sim)
-        qdq_model  = _remove_final_qdq(qdq_model_)
+        qdq_model = _to_onnx_qdq(sim)
         
         qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
         eval(qdq_session,dataloader,'dd')
