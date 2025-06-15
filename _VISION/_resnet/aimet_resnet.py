@@ -117,7 +117,7 @@ def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
     :param qdq_model: QDQ 노드가 포함된 ONNX 모델
     :return: 최종 출력 QDQ가 제거된 ONNX 모델
     """
-    print("\n--- 최종 출력 QDQ 노드 및 관련 Initializer 제거 시작 ---")
+    # print("\n--- 최종 출력 QDQ 노드 및 관련 Initializer 제거 시작 ---")
     graph = qdq_model.graph
     
     # 모델의 최종 출력 텐서 이름들을 복사해서 사용 (순회 중 변경될 수 있으므로)
@@ -143,8 +143,8 @@ def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
         scale_name = final_q_node.input[1]
         zp_name = final_q_node.input[2]
         
-        print(f"   - 제거 대상 QDQ 쌍 확인: ('{final_q_node.name}', '{final_dq_node.name}')")
-        print(f"   - 제거 대상 Initializer 확인: ('{scale_name}', '{zp_name}')")
+        # print(f"   - 제거 대상 QDQ 쌍 확인: ('{final_q_node.name}', '{final_dq_node.name}')")
+        # print(f"   - 제거 대상 Initializer 확인: ('{scale_name}', '{zp_name}')")
         
         # 모델의 최종 출력을 QDQ 이전의 텐서로 변경
         for out_val_info in graph.output:
@@ -163,7 +163,7 @@ def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
     graph.ClearField("initializer")
     graph.initializer.extend(remaining_initializers)
         
-    print("--- 노드 및 Initializer 제거 완료 ---")
+    # print("--- 노드 및 Initializer 제거 완료 ---")
     return qdq_model
 
 
@@ -318,7 +318,8 @@ def main(args):
         try:
             model, _ = simplify(model)
         except:
-            print('ONNX Simplifier failed. Proceeding with unsimplified model')
+            pass
+            # print('ONNX Simplifier failed. Proceeding with unsimplified model')
         sim = QuantizationSimModel(model=model,
                                 quant_scheme=QuantScheme.post_training_tf,
                                 default_activation_bw=8,
