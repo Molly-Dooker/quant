@@ -5,20 +5,36 @@ import itertools
 from loguru import logger
 from tqdm import tqdm
 import argparse
+import json
+import os
+
 import torch
 from datasets import load_dataset
 from ultralytics import YOLO
 from ultralytics.utils.metrics import DetMetrics
 from ultralytics.utils.ops import non_max_suppression
-from _util import class_names, update_stats
+
+from safetensors.torch import load_file, save_file
+from optimum.quanto import (
+    freeze,
+    quantization_map,
+)
+from _quanto import _quantize, _requantize, _Calibration
+from _util import class_names, keyword_to_itype, update_stats
 from _yolov8s import Yolov8s
 from _dataloader import Processor, transform, custom_collate_fn
 
+
+from torch_config.myconfig import simple_qconfig_mapping, default_qconfig_mapping, save_graph
 from torch.ao.quantization.quantize_fx import (
     prepare_qat_fx,
     convert_fx,
-)
-from torch_config.myconfig import simple_qconfig_mapping, default_qconfig_mapping
+    
+    )
+from torch.ao.quantization import prepare, convert
+
+
+        
 
 def eval(model, device, dataloader, size=640, prefix=''):    
     stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -67,7 +83,6 @@ def logger_enable(prefix=''):
     logger.add("_logs/log", rotation="500 MB", level="INFO", format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
-
 def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
@@ -77,26 +92,52 @@ def main(args):
         yolo =  YOLO(args.model_name)
         yolo.fuse()
         yolo.eval()
-        
+        model = Yolov8s(yolo.model.model, args.size)
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         processor = Processor(new_shape=(args.size, args.size))
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)
-        model = Yolov8s(yolo.model.model, args.size).eval()
-        
+        # base model evaluation
+        # eval(model, args.device, dataloader, args.size, 'quantized')
+        dummy_input = torch.randn(1, 3, args.size, args.size)  
+        model.eval()     
 
-        dummy_input = torch.randn(1, 3, args.size, args.size)
-        model_ = prepare_qat_fx(model, simple_qconfig_mapping, dummy_input)
-        calibrate(model_,args.device,dataloader,500)     
+        
+        
+        qconfig_mapping = simple_qconfig_mapping.set_module_name('m22.dfl.conv',None)
+        model_ = prepare_qat_fx(model, qconfig_mapping, dummy_input)
+        calibrate(model_, args.device, dataloader)     
         model_.to('cpu')
         q_model = convert_fx(model_)
-        ipdb.set_trace()
+        save_graph(q_model)
         jit_model = torch.jit.trace(q_model, dummy_input) 
+        ipdb.set_trace()
+        eval(jit_model,'cpu', dataloader, args.size, 'quantized') 
+
+        
+        
+
+
+    if EVAL:
+        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+        processor = Processor(new_shape=(args.size, args.size))
+        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)        
+        state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
+        with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
+            qmap = json.load(f)
+        yolo =  YOLO(args.model_name)
+        yolo.fuse()
+        yolo.eval()
+        model = Yolov8s(yolo.model.model, args.size)
+        _requantize(model, state_dict, qmap, args.device)
+        freeze(model)
+        eval(model, args.device, dataloader, args.size, 'reloaded')
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="yolo")
-    parser.add_argument("--prefix", type=str, default="TEST")
+    parser.add_argument("--prefix", type=str, default="YOLO_tt")
     parser.add_argument("--model_name", type=str, default="yolov8s.pt")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
@@ -104,7 +145,7 @@ if __name__ == '__main__':
     parser.add_argument("--split", type=str, default='val')
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--device", type=int, default=4, help="The device to use for evaluation.")
+    parser.add_argument("--device", type=int, default=5, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
 

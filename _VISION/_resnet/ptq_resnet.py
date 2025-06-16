@@ -4,6 +4,8 @@ import itertools
 import math
 import ipdb
 from loguru import logger
+import torch.ao.quantization
+import torch.ao.quantization.quantize_fx
 from tqdm import tqdm
 from _util import transform
 import torchvision
@@ -78,8 +80,14 @@ def main(args):
         
         dummy_input = torch.randn(1, 3, 224, 224)
         model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()        
-        model.eval()             
-        model_ = prepare_qat_fx(model, simple_qconfig_mapping, dummy_input)
+        model.eval()    
+
+
+        from torch.ao.quantization import get_default_qconfig_mapping
+        qconfig_mapping =         get_default_qconfig_mapping()       
+        model.qconfig=  qconfig_mapping
+        model_ = prepare(model,inplace=False)
+        ipdb.set_trace()
         calibrate(model_,args.device,dataloader,500)     
         model_.to('cpu')
         q_model = convert_fx(model_)

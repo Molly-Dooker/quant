@@ -129,27 +129,29 @@ def _get_default_qconfig_mapping(
 
     return qconfig_mapping
 
-qconfig = QConfig(
-    activation=FusedMovingAvgObsFakeQuantize.with_args(
-        observer=MovingAverageMinMaxObserver.with_args(qscheme=torch.per_tensor_symmetric),
-        quant_min=0,
-        quant_max=255,
-        reduce_range=False,
-        dtype=torch.quint8,
-        qscheme=torch.per_tensor_symmetric
-    ),
-    weight=FusedMovingAvgObsFakeQuantize.with_args(
-        observer=MovingAveragePerChannelMinMaxObserver,
-        quant_min=-128,
-        quant_max=127,
-        dtype=torch.qint8,
-        qscheme=torch.per_channel_symmetric,
-        ),
-)
+# qconfig = QConfig(
+#     activation=FusedMovingAvgObsFakeQuantize.with_args(
+#         observer=MovingAverageMinMaxObserver.with_args(qscheme=torch.per_tensor_affine),
+#         quant_min=0,
+#         quant_max=255,
+#         reduce_range=False,
+#         dtype=torch.quint8,
+#         qscheme=torch.per_tensor_affine
+#     ),
+#     weight=FusedMovingAvgObsFakeQuantize.with_args(
+#         observer=MovingAveragePerChannelMinMaxObserver,
+#         quant_min=-128,
+#         quant_max=127,
+#         dtype=torch.qint8,
+#         qscheme=torch.per_channel_symmetric,
+#         ),
+# )
 
-simple_qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig).set_object_type(ReLU,qconfig).set_object_type(torch.nn.BatchNorm2d,qconfig)
-default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=True,backend='x86',version=1).set_object_type(torch.cat,None)
-# default_qconfig_mapping = _get_default_qconfig_mapping(is_qat=False,backend='x86',version=0).set_object_type(torch.cat,None)
+qconfig = get_default_qat_qconfig()
+
+
+simple_qconfig_mapping  = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig).set_object_type(ReLU,qconfig).set_object_type(torch.nn.BatchNorm2d,qconfig)
+default_qconfig_mapping = get_default_qat_qconfig_mapping().set_object_type(torch.cat,None)
 
 
 

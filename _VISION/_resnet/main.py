@@ -29,7 +29,7 @@ from optimum.quanto import (
     quantization_map
 )
 from _quanto import _quantize, _requantize, _Calibration
-from aimet_torch.batch_norm_fold import fold_all_batch_norms
+# from aimet_torch.batch_norm_fold import fold_all_batch_norms
 def logger_enable(prefix=''):
     def console_filter(record):
         # extra에 file_only가 True인 경우 콘솔 출력 제외
