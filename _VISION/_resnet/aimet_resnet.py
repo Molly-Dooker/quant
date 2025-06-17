@@ -134,6 +134,8 @@ def main(args):
                                 default_param_bw=8,
                                 providers=providers,
                                 config_file='_custom_config.json')
+        sim.qc_quantize_op_dict['classifier.1.weight'].enabled=False
+            
 
 
 
@@ -145,27 +147,26 @@ def main(args):
         with open(root+'graph_qdq.graph', "w") as f:
             f.write(str(qdq_model.graph.node))
         onnx.save(qdq_model,root+'qdq.onnx')
-        ipdb.set_trace()
         qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
-        eval(qdq_session, data_loader, 'quantized')
+        eval(qdq_session, data_loader, 'quantized')  #79.39
 
 
 
 
-    if EVAL:
-        processor = ViTImageProcessor.from_pretrained(args.model_name)
-        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-        state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
-        with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
-            qmap = json.load(f)
-        config = ViTConfig.from_pretrained(args.model_name)
-        with init_empty_weights():
-            model = ViTForImageClassification.from_pretrained(args.model_name, config=config)
-        _requantize(model, state_dict, qmap, args.device)
-        freeze(model)
-        eval(model, args.device, dataloader,'reloaded')
+    # if EVAL:
+    #     processor = ViTImageProcessor.from_pretrained(args.model_name)
+    #     ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+    #     prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+    #     dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    #     state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
+    #     with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
+    #         qmap = json.load(f)
+    #     config = ViTConfig.from_pretrained(args.model_name)
+    #     with init_empty_weights():
+    #         model = ViTForImageClassification.from_pretrained(args.model_name, config=config)
+    #     _requantize(model, state_dict, qmap, args.device)
+    #     freeze(model)
+    #     eval(model, args.device, dataloader,'reloaded')
 
 if __name__ == "__main__":
 
