@@ -1,4 +1,3 @@
-
 from loguru import logger
 import onnx
 from aimet_common.onnx._utils import _add_onnx_qdq_nodes
@@ -183,45 +182,3 @@ def _to_onnx_qdq(sim) -> onnx.ModelProto:
     # onnx.checker.check_model(model_copy, True)
     qdq_model = _remove_final_qdq(model_copy)
     return qdq_model
-
-
-
-
-
-
-dummy_input = torch.randn(1, 3, 224, 224)           
-providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-filename = 'resnet18.onnx'
-model = onnx.load_model(filename)
-# eval(session,dataloader,args.prefix)
-root = f'output/{args.prefix}/'        
-os.makedirs(root,exist_ok=True)
-shutil.copyfile('_custom_config.json',root+'config.json')        
-
-with open(root+'graph.graph', "w") as f:
-    f.write(str(model.graph.node))        
-try:
-    model, _ = simplify(model)
-except:
-    pass
-    # print('ONNX Simplifier failed. Proceeding with unsimplified model')
-sim = QuantizationSimModel(model=model,
-                        quant_scheme=QuantScheme.post_training_tf,
-                        default_activation_bw=8,
-                        default_param_bw=8,
-                        providers=providers,
-                        config_file='_custom_config.json')
-    
-sim.compute_encodings(forward_pass_callback=lambda session,samples : calibrate_wrapper(session,samples,dataloader),
-                    forward_pass_callback_args=1000)
-
-qdq_model = _to_onnx_qdq(sim)
-
-qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
-eval(qdq_session,dataloader,'dd')
-
-onnx.save(qdq_model,root+'qdq.onnx')
-with open(root+'graph_qdq.graph', "w") as f:
-    f.write(str(qdq_model.graph.node))
-
-        
