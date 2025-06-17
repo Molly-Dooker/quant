@@ -43,6 +43,7 @@ def eval(model, device, dataloader, size=640, prefix=''):
             # id  = batch['image_id']            
             origin_shapes = batch['origin_shape']
             output  = model(img)
+            ipdb.set_trace()
             preds = nms(output)
             stats = update_stats(preds, objects, origin_shapes, stats, device, size)
     stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in stats.items()}
@@ -91,7 +92,7 @@ def main(args):
         dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)
         model = Yolov8s(yolo.model.model, args.size)
         # base model evaluation
-        if args.default: eval(model, args.device, dataloader, args.size, 'quantized')
+        eval(model, args.device, dataloader, args.size, 'quantized')
         weights = keyword_to_itype(args.weights)
         activations = keyword_to_itype(args.activations)
         exclude = []

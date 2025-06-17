@@ -24,27 +24,46 @@ from _util import class_names, keyword_to_itype, update_stats
 from _yolov8s import Yolov8s
 from _dataloader import Processor, transform, custom_collate_fn
 
+class TempLoggerPatch:
+    """
+    with 문 내에서 다른 모듈의 로거를 임시로 교체하는 컨텍스트 매니저.
+    """
+    def __init__(self, target_module, new_logger):
+        self.target_module = target_module
+        self.new_logger = new_logger
+        self.original_logger = None
+
+    def __enter__(self):
+        """with 블록 시작 시 호출: 로거를 교체합니다."""
+        # 원래 로거를 백업합니다.
+        self.original_logger = getattr(self.target_module, 'logger', None)
+        # 목표 모듈의 로거를 새로 설정한 로거로 교체합니다.
+        self.target_module.logger = self.new_logger
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """with 블록 종료 시 호출: 로거를 원상 복구합니다."""
+        # 백업해 둔 원래 로거로 복원합니다.
+        self.target_module.logger = self.original_logger
 
 
         
 
-def eval(model, device, dataloader, size=640, prefix=''):    
+def eval(model, dataloader, size=640, prefix=''):    
     stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
     nms = lambda predictions: non_max_suppression(prediction=predictions, conf_thres=0.001, iou_thres=0.7, labels=[], nc=80, multi_label=True, agnostic=False, max_det=300, end2end=False, rotated=False)
     metrics = DetMetrics()
     metrics.names = class_names
-    model.to(device)
-    model.eval()
+    input_name = model.get_inputs()[0].name
 
-    with torch.no_grad():
-        for batch in tqdm(dataloader,desc='EVAL..'):
-            img = batch['image'].to(device)
-            objects = batch['objects']
-            # id  = batch['image_id']            
-            origin_shapes = batch['origin_shape']
-            output  = model(img)
-            preds = nms(output)
-            stats = update_stats(preds, objects, origin_shapes, stats, device, size)
+    for batch in tqdm(dataloader,desc='EVAL..'):
+        img = batch['image'].numpy()
+        objects = batch['objects']
+        # id  = batch['image_id']            
+        origin_shapes = batch['origin_shape']
+        output = model.run(None,{input_name:img})[0]
+        preds = nms(torch.tensor(output))
+        stats = update_stats(preds, objects, origin_shapes, stats, 'cpu', size)
     stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in stats.items()}
     stats.pop("target_img", None)
     if len(stats):
@@ -55,14 +74,15 @@ def eval(model, device, dataloader, size=640, prefix=''):
     logger.info(f'{prefix} mAP50:{mAP50 : .3f}, mAP50-95 : {mAP5095:.3f}')
 
 
-def calibrate(model, device, dataloader, num=10000):
-    model.to(device)
-    model.eval()
+def calibrate(model, dataloader, num=10000):
+    # model.to(device)
+    # model.eval()
+    input_name = model.get_inputs()[0].name
     iter =  min(math.ceil(num/dataloader.batch_size), dataloader.__len__())
-    with torch.no_grad():
-        for batch in tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating..."):
-            img = batch['image'].to(device)
-            _   = model(img)
+    # with torch.no_grad():
+    for batch in tqdm(itertools.islice(dataloader, iter), total=iter, desc="calibrating..."):
+        img = batch['image'].numpy()        
+        _   = model.run(None,{input_name:img})
 
 def logger_enable(prefix=''):
     def console_filter(record):
@@ -75,42 +95,53 @@ def logger_enable(prefix=''):
     logger.add("_logs/log", rotation="500 MB", level="INFO", format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
+import onnx 
+import shutil
+from onnxsim import simplify
+import onnxruntime as ort
+from aimet_common.defs import QuantScheme
+from aimet_onnx.quantsim import QuantizationSimModel
+import BOS_config.aimet_util as aimet_util
 def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
     EVAL = args.eval
 
-    if not EVAL:
-        yolo =  YOLO(args.model_name)
-        ipdb.set_trace()
-        yolo.fuse()
-        yolo.eval()
-
+    if not EVAL:          
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         processor = Processor(new_shape=(args.size, args.size))
         prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)
-        model = Yolov8s(yolo.model.model, args.size)
-        # base model evaluation
-        if args.default: eval(model, args.device, dataloader, args.size, 'quantized')
-        weights = keyword_to_itype(args.weights)
-        activations = keyword_to_itype(args.activations)
-        exclude = []
-        if args.exclude is not None:
-            exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
-            if args.exclude=='': exclude = []
-        _quantize(model, weights=weights, activations=activations, exclude=exclude)
-        if activations is not None:
-            with _Calibration():
-                calibrate(model, args.device, dataloader)
-        freeze(model)
-        eval(model, args.device, dataloader, args.size, 'quantized') 
-        ipdb.set_trace()
-        os.makedirs(args.saveroot,exist_ok=True)
-        save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
-        with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
-            json.dump(quantization_map(model), f)
+        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)       
+        model= onnx.load('yolov8s.onnx')
+        root = f'output/{args.prefix}/'        
+        os.makedirs(root,exist_ok=True)
+        shutil.copyfile('_custom_config.json',root+'config.json')  
+        
+            
+        try:    model, _ = simplify(model); print('simplify success')
+        except: print('silplify failed')
+        with open(root+'graph.graph', "w") as f: f.write(str(model.graph.node))      
+  
+        # session = ort.InferenceSession(model.SerializeToString(),providers=providers)   
+        # eval(session, dataloader, args.size, 'default') 
 
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        sim = QuantizationSimModel(model=model,
+                                quant_scheme=QuantScheme.post_training_tf,
+                                default_activation_bw=8,
+                                default_param_bw=8,
+                                providers=providers,
+                                config_file='_custom_config.json')
+        # sim.qc_quantize_op_dict['classifier.1.weight'].enabled=False
+        sim.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=3000)
+        with TempLoggerPatch(aimet_util, logger):
+            qdq_model = aimet_util._to_onnx_qdq(sim)
+        del sim
+        with open(root+'graph_qdq.graph', "w") as f:
+            f.write(str(qdq_model.graph.node))
+        onnx.save(qdq_model,root+f'{args.prefix}.onnx')
+        qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
+        eval(qdq_session, dataloader, args.size, 'default') 
     if EVAL:
         ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
         processor = Processor(new_shape=(args.size, args.size))
@@ -130,7 +161,7 @@ def main(args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="yolo")
-    parser.add_argument("--prefix", type=str, default="YOLO_tt")
+    parser.add_argument("--prefix", type=str, default="test1")
     parser.add_argument("--model_name", type=str, default="yolov8s.pt")
     parser.add_argument("--dataset_name", type=str, default='rafaelpadilla/coco2017')
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/COCO')
@@ -142,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
 
-    parser.add_argument("--size", type=int, default=416)
+    parser.add_argument("--size", type=int, default=640)
     parser.add_argument('--exclude', type=str)
 
     parser.add_argument('--eval', action='store_true', help='Enable eval mode')

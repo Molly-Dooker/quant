@@ -125,7 +125,7 @@ def main(args):
         with open(root+'graph.graph', "w") as f: f.write(str(model.graph.node))   
 
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-        
+
         # eval(session, dataloader, 'default') 80.14
 
         sim = QuantizationSimModel(model=model,
@@ -135,20 +135,15 @@ def main(args):
                                 providers=providers,
                                 config_file='_custom_config.json')
         sim.qc_quantize_op_dict['classifier.1.weight'].enabled=False
-            
-
-
-
-        sim.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, data_loader, samples), forward_pass_callback_args=2000)
-
+        sim.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, data_loader, samples), forward_pass_callback_args=1000)
         with TempLoggerPatch(aimet_util, logger):
             qdq_model = aimet_util._to_onnx_qdq(sim)
         del sim
         with open(root+'graph_qdq.graph', "w") as f:
             f.write(str(qdq_model.graph.node))
-        onnx.save(qdq_model,root+'qdq.onnx')
-        qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
-        eval(qdq_session, data_loader, 'quantized')  #79.39
+        onnx.save(qdq_model,root+f'{args.prefix}.onnx')
+        # qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
+        # eval(qdq_session, data_loader, 'quantized')  #79.39
 
 
 
