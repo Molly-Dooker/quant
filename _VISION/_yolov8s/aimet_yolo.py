@@ -132,8 +132,21 @@ def main(args):
                                 default_param_bw=8,
                                 providers=providers,
                                 config_file='_custom_config.json')
-        # sim.qc_quantize_op_dict['classifier.1.weight'].enabled=False
-        sim.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=3000)
+
+        for key in sim.qc_quantize_op_dict:
+            qc = sim.qc_quantize_op_dict[key]
+            enabled = qc.enabled
+            if not enabled: continue
+            
+            if not('constant' in key or 'Constant' in key or 'Squeeze' in key) : continue
+            sim.qc_quantize_op_dict[key].enabled = False
+        
+        # for node in sim.model.nodes(): 
+        #     name = node.name
+        #     op_type = node.op_type
+        #     if not op_type == 'Concat': continue
+        #     break           
+        sim.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=4000)
         with TempLoggerPatch(aimet_util, logger):
             qdq_model = aimet_util._to_onnx_qdq(sim)
         del sim

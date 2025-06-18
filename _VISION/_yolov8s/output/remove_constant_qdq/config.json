@@ -16,7 +16,7 @@
         "op_type": {
                 "MatMul": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "True",
+                        "is_output_quantized": "False",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {
@@ -27,7 +27,7 @@
                 },
                 "Conv": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "True",
+                        "is_output_quantized": "False",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {
@@ -38,7 +38,7 @@
                 },
                 "ConvTranspose": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "True",
+                        "is_output_quantized": "False",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {
@@ -49,40 +49,7 @@
                 },
                 "Gemm": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "True",
-                        "per_channel_quantization": "True",
-                        "params": {
-                                "weight": {
-                                        "is_quantized": "True",
-                                        "is_symmetric": "True"
-                                }
-                        }
-                },
-                "Relu": {
-                        "is_input_quantized": "True",
-                        "is_output_quantized": "True",
-                        "per_channel_quantization": "True",
-                        "params": {
-                                "weight": {
-                                        "is_quantized": "True",
-                                        "is_symmetric": "True"
-                                }
-                        }
-                },
-                "Clip": {
-                        "is_input_quantized": "True",
-                        "is_output_quantized": "True",
-                        "per_channel_quantization": "True",
-                        "params": {
-                                "weight": {
-                                        "is_quantized": "True",
-                                        "is_symmetric": "True"
-                                }
-                        }
-                },
-                "Add": {
-                        "is_input_quantized": "True",
-                        "is_output_quantized": "True",
+                        "is_output_quantized": "False",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {
@@ -128,4 +95,4 @@
                 "is_input_quantized": "True"
         },
         "model_output": {}
-}s
+}
