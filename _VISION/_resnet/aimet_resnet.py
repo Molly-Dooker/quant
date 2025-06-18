@@ -52,13 +52,26 @@ def eval(model, device, test_loader, prefix=''):
             data, target = batch["pixel_values"], batch["labels"]
             data= data.to(device)
             output = model(data)
-            if isinstance(output, QTensor):
-                output = output.dequantize()
             output = output.argmax(-1).cpu()
             metric.add_batch(predictions=output,references=target)
 
     acc = metric.compute()['accuracy']
     logger.info(f'{prefix} model acc : {acc*100:.2f}%')
+    
+
+def eval_onnx(model, test_loader, prefix=''):
+    input_name = model.get_inputs()[0].name
+    metric = evaluate.load("accuracy")
+    for batch in tqdm(test_loader,desc='eval...'):
+        data, target = batch["pixel_values"], batch["labels"]
+        data = data.numpy()
+        output = model.run(None,{input_name:data})[0]
+        output = output.argmax(-1)
+        metric.add_batch(predictions=output,references=target)
+
+    acc = metric.compute()['accuracy']
+    logger.info(f'{prefix} model acc : {acc*100:.2f}%')
+    
 
 def calibrate(model, device, dataloader, num=10000):
     model.to(device)
@@ -71,14 +84,35 @@ def calibrate(model, device, dataloader, num=10000):
             _ = model(data)
 
 
+import re
+def is_match(name, patterns):
+    for pattern in patterns:
+        if pattern.startswith('re:'):
+            regex = pattern[3:]
+            if re.match(regex, name): 
+                return True
+        else:
+            if pattern==name:
+                return True
+    return False
+
+def exclude_torch_quantizer(model, exclude):
+    for name, m in model.named_modules():
+        if not is_match(name,exclude): continue
+        if hasattr(m,'param_quantizers'):  m.param_quantizers  = torch.nn.ModuleDict()           
+        if hasattr(m,'input_quantizers'):  m.input_quantizers  = torch.nn.ModuleList([None]*len(m.input_quantizers))
+        if hasattr(m,'output_quantizers'): m.output_quantizers = torch.nn.ModuleList([None]*len(m.output_quantizers))
+
 
 
 from aimet_torch.batch_norm_fold import fold_all_batch_norms
 from aimet_torch.model_preparer import prepare_model
 from aimet_common.defs import QuantScheme
 from aimet_torch.quantsim import QuantizationSimModel
-from aimet_torch.onnx import export
+from BOS_config.torch_util import to_onnx_qdq
 import shutil
+import onnx
+import onnxruntime as ort
 def main(args):
     logger_enable(args.prefix)
 
@@ -106,14 +140,22 @@ def main(args):
                             default_output_bw=8,
                             default_param_bw=8,
                             config_file=config_path)
-    sim.compute_encodings(forward_pass_callback=lambda model, device: calibrate(model,device,data_loader,2000), forward_pass_callback_args=args.device)
-
-        
+    
+    exclude = []
+    if args.exclude is not None:
+        exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
+        if args.exclude=='': exclude = []
+    logger.info(f'exclude : {exclude}')   
+    exclude_torch_quantizer(sim.model,exclude)
+    sim.compute_encodings(forward_pass_callback=lambda model, device: calibrate(model,device,data_loader, 2000), forward_pass_callback_args=args.device)
+    qdq_model =   to_onnx_qdq(sim.model,dummy_input)
+    onnx.save(qdq_model,root+f'{args.prefix}.onnx')
+    with open(root+'graph_qdq.graph', "w") as f: f.write(str(qdq_model.graph.node))
+    qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])      
+    eval_onnx(qdq_session,data_loader,'quantized')
 
     
-    export(model=sim.model,args=dummy_input,f=root+'qdq.onnx',export_int32_bias=False)       
-        
-
+    
 
 
 

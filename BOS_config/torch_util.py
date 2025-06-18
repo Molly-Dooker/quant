@@ -1,5 +1,5 @@
-import copy
 import contextlib
+import copy
 import io
 import os
 import tempfile
@@ -29,12 +29,11 @@ _TORCH_MAX_OPSET = _constants.ONNX_MAX_OPSET
 _AIMET_MAX_OPSET = max(_TORCH_MAX_OPSET, 21)
 
 
-def export(
+def to_onnx_qdq(
     model: Union[torch.nn.Module, QuantizationSimModel],
-    args: Union[Tuple[Any, ...], torch.Tensor],
-    f: Union[str, io.BytesIO],
+    dummy_input: Union[Tuple[Any, ...], torch.Tensor],
     *,
-    export_int32_bias: bool = True,
+    export_int32_bias: bool = False,
     **kwargs,
 ):
     """
@@ -105,7 +104,7 @@ def export(
         if export_int32_bias:
             # Temoprarily instantiate int32 bias quantizers
             stack.enter_context(
-                _concretize_int32_bias_quantizers(model, args, kwargs.get("kwargs"))
+                _concretize_int32_bias_quantizers(model, dummy_input, kwargs.get("kwargs"))
             )
 
         # Export quantize-dequantized weight
@@ -115,7 +114,7 @@ def export(
         # Remove [b]float16 quantizers
         stack.enter_context(_remove_fp16_quantizers(model))
 
-        onnx_model, tensor_to_encoding_map = _to_onnx(model, args, **kwargs)
+        onnx_model, tensor_to_encoding_map = _to_onnx(model, dummy_input, **kwargs)
 
     if _TORCH_MAX_OPSET < target_version:
         try:
@@ -145,12 +144,79 @@ def export(
                 "==============================================================\n\n"
             )
             raise RuntimeError(msg) from e
-
-    onnx_qdq_model = _to_onnx_qdq(onnx_model, tensor_to_encoding_map)
     # onnx.save(onnx_qdq_model, f)
-    return onnx_qdq_model
+    
+    _qdq_model = _to_onnx_qdq(onnx_model, tensor_to_encoding_map)
+    qdq_model = _remove_final_qdq(_qdq_model)
+
+    # dynamic inputsize
+    for i,input in enumerate(qdq_model.graph.input):
+        input.type.tensor_type.shape.dim[0].ClearField("dim_value")
+        input.type.tensor_type.shape.dim[0].dim_param = 'batch_size' 
+
+    for i,output in enumerate(qdq_model.graph.output):
+        output.type.tensor_type.shape.dim[0].ClearField("dim_value")
+        output.type.tensor_type.shape.dim[0].dim_param = 'batch_size' 
+    
+    return qdq_model
 
 
+
+
+def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
+    """
+    생성된 QDQ 모델의 최종 출력에 불필요하게 붙은 QDQ 노드와 관련 Initializer를 제거합니다.
+    :param qdq_model: QDQ 노드가 포함된 ONNX 모델
+    :return: 최종 출력 QDQ가 제거된 ONNX 모델
+    """
+    # print("\n--- 최종 출력 QDQ 노드 및 관련 Initializer 제거 시작 ---")
+    graph = qdq_model.graph
+    
+    # 모델의 최종 출력 텐서 이름들을 복사해서 사용 (순회 중 변경될 수 있으므로)
+    original_output_names = [output.name for output in graph.output]
+    
+    nodes_to_remove = []
+    initializers_to_remove = set()
+
+    for output_name in original_output_names:
+        # 최종 출력을 생성하는 Dequantize 노드를 찾음
+        final_dq_node = next((n for n in graph.node if n.op_type == 'DequantizeLinear' and n.output[0] == output_name), None)
+        
+        if not final_dq_node:
+            continue
+            
+        quantized_tensor_name = final_dq_node.input[0]
+        final_q_node = next((n for n in graph.node if n.op_type == 'QuantizeLinear' and n.output[0] == quantized_tensor_name), None)
+        
+        if not final_q_node:
+            continue
+
+        original_tensor_name = final_q_node.input[0]
+        scale_name = final_q_node.input[1]
+        zp_name = final_q_node.input[2]
+        
+        # print(f"   - 제거 대상 QDQ 쌍 확인: ('{final_q_node.name}', '{final_dq_node.name}')")
+        # print(f"   - 제거 대상 Initializer 확인: ('{scale_name}', '{zp_name}')")
+        
+        # 모델의 최종 출력을 QDQ 이전의 텐서로 변경
+        for out_val_info in graph.output:
+            if out_val_info.name == output_name:
+                out_val_info.name = original_tensor_name
+        
+        nodes_to_remove.extend([final_q_node, final_dq_node])
+        initializers_to_remove.update([scale_name, zp_name])
+    
+    # 실제 노드 및 Initializer 제거
+    for node in nodes_to_remove:
+        graph.node.remove(node)
+    
+    # 제거 대상이 아닌 Initializer들만 남김
+    remaining_initializers = [init for init in graph.initializer if init.name not in initializers_to_remove]
+    graph.ClearField("initializer")
+    graph.initializer.extend(remaining_initializers)
+        
+    # print("--- 노드 및 Initializer 제거 완료 ---")
+    return qdq_model
 
 def _why_do_i_need_opset21(model: torch.nn.Module) -> str:
     int4 = False
@@ -548,14 +614,3 @@ def _restore_model_output_names(
         }
     )
     _rename_outputs(onnx_model, _new_names)
-
-
-import contextlib
-
-def save_graph(model, file_path = "model_graph"):
-
-    # 표준 출력을 파일로 리디렉션합니다.
-    with open(file_path, 'w') as f:
-        with contextlib.redirect_stdout(f):
-            # 이 블록 안에서의 print() 또는 stdout 출력은 모두 파일 'f'에 기록됩니다.
-            model.graph.print_tabular()
