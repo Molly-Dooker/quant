@@ -5,7 +5,7 @@ import os
 import tempfile
 import traceback
 from typing import Any, Mapping, Tuple, Union
-
+from loguru import logger
 import onnx
 import torch
 from torch.onnx import _constants
@@ -19,7 +19,7 @@ from aimet_torch.quantization.affine import AffineQuantizerBase, GroupedBlockQua
 from aimet_torch.quantization.float import FloatQuantizeDequantize
 from aimet_torch.quantsim import QuantizationSimModel
 from aimet_torch.v2.experimental import onnx as _onnx
-
+from aimet_common.defs import QuantizationDataType
 
 _TORCH_DEFAULT_OPSET = _constants.ONNX_DEFAULT_OPSET
 _TORCH_MIN_OPSET = _constants.ONNX_MIN_OPSET
@@ -28,8 +28,131 @@ _TORCH_MAX_OPSET = _constants.ONNX_MAX_OPSET
 # Allow at least up to opset 21 to enable [u]int16 QDQ export
 _AIMET_MAX_OPSET = max(_TORCH_MAX_OPSET, 21)
 
+def to_qdq_onnx(sim) -> onnx.ModelProto:
+    """
+    Return a copy of ModelProto with all QcQuantizeOp replaced with
+    onnx::QuantizeLinear and/or DequantizeLinear
+    """
+    onnx_opset_version = next(
+        opset.version for opset in sim.model.opset_import() if opset.domain == ""
+    )
 
-def to_onnx_qdq(
+    desired_onnx_opset_version = onnx_opset_version
+
+    if onnx_opset_version < 10:
+        desired_onnx_opset_version = 10
+
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear are only supported in opset >= 10;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    if onnx_opset_version < 13 and any(
+        qtzr.quant_info.usePerChannelMode
+        and qtzr.tensor_quantizer_params
+        and qtzr.tensor_quantizer_params.channel_axis is not None
+        for qtzr in sim.qc_quantize_op_dict.values()
+    ):
+        desired_onnx_opset_version = 13
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear with per-channel are only supported in opset >= 13;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    if onnx_opset_version < 21 and any(
+        qtzr.quant_info.usePerChannelMode
+        and qtzr.tensor_quantizer_params
+        and qtzr.quant_info.blockSize > 0
+        for qtzr in sim.qc_quantize_op_dict.values()
+    ):
+        desired_onnx_opset_version = 21
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear with per-block are only supported in opset >= 21;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    if onnx_opset_version < 21 and any(
+        qtzr.data_type == QuantizationDataType.int and 8 < qtzr.bitwidth <= 16
+        for qtzr in sim.qc_quantize_op_dict.values()
+    ):
+        desired_onnx_opset_version = 21
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear with INT16 are only supported in opset >= 21;"
+            " got opset=%d",
+            onnx_opset_version,
+        )
+
+    model_copy = onnx.ModelProto()
+    model_copy.CopyFrom(sim.model.model)
+
+    sim._overwrite_parameters(model_copy, sim._get_qdq_parameters())
+
+    aimet_qc_quantize_nodes = [
+        node
+        for node in model_copy.graph.node
+        if node.op_type == "QcQuantizeOp"
+        and node.domain in ("aimet.customop.cpu", "aimet.customop.cuda")
+    ]
+
+    qdq_node_info = {
+        "input_names": [],
+        "output_names": [],
+        "node_name_prefixes": [],
+        "encodings": [],
+    }
+
+    for aimet_node in aimet_qc_quantize_nodes:
+        qtzr = sim.qc_quantize_op_dict[aimet_node.input[0]]
+        encodings = qtzr._export_2_0_0_encodings()  # pylint: disable=protected-access
+
+        if encodings:
+            # Affine quantizer
+            # Replace QcQuantizeOp with onnx::QuantizeLinear and DequantizeLinear
+            qdq_node_info["input_names"].append(aimet_node.input[0])
+            qdq_node_info["output_names"].append(aimet_node.output[0])
+            qdq_node_info["node_name_prefixes"].append(aimet_node.name)
+            qdq_node_info["encodings"].append(encodings)
+
+    graph_output_names = [out.name for out in model_copy.graph.output]
+    sim.remove_quantizers(model_copy)
+
+    if onnx_opset_version < desired_onnx_opset_version:
+        model_copy = onnx.version_converter.convert_version(
+            model_copy, desired_onnx_opset_version
+        )
+
+    _add_onnx_qdq_nodes(
+        model_copy, **qdq_node_info, onnx_opset=desired_onnx_opset_version
+    )
+
+    # Graph output could have been renamed during self.remove_quantizers.
+    # Restore the original output names
+    q_input_names = set(
+        node.input[0]
+        for node in model_copy.graph.node
+        if node.op_type == "QuantizeLinear"
+    )
+    dq_output_names = set(
+        node.output[0]
+        for node in model_copy.graph.node
+        if node.op_type == "DequantizeLinear"
+    )
+    for out, orig_name in zip(model_copy.graph.output, graph_output_names):
+        if out.name in q_input_names and orig_name in dq_output_names:
+            out.name = orig_name
+
+    # TODO: Unfortunately, this sanity check doesn't pass yet because the
+    #       QcQuantizeOp nodes inserted during QuantizationSimModel.__init__
+    #       aren't topologically sorted, but onnx.checker asserts topological
+    #       order of all nodes. Needs to be fixed asap.
+    # onnx.checker.check_model(model_copy, True)
+    qdq_model = _remove_final_qdq(model_copy)
+    return qdq_model
+
+def to_qdq_torch(
     model: Union[torch.nn.Module, QuantizationSimModel],
     dummy_input: Union[Tuple[Any, ...], torch.Tensor],
     *,
@@ -159,9 +282,6 @@ def to_onnx_qdq(
         output.type.tensor_type.shape.dim[0].dim_param = 'batch_size' 
     
     return qdq_model
-
-
-
 
 def _remove_final_qdq(qdq_model: onnx.ModelProto) -> onnx.ModelProto:
     """
@@ -586,7 +706,6 @@ def _rename_outputs(onnx_model: onnx.ModelProto, new_names: Mapping[str, str]):
             if new_name is not None:
                 node.output[i] = new_name
 
-
 def _restore_model_output_names(
     onnx_model: onnx.ModelProto, new_names: Mapping[str, str]
 ):
@@ -614,3 +733,7 @@ def _restore_model_output_names(
         }
     )
     _rename_outputs(onnx_model, _new_names)
+    
+def save_graph(model, path):
+    with open(path, "w") as f: 
+        f.write(str(model.graph.node))

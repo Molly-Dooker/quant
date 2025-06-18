@@ -109,7 +109,7 @@ from aimet_torch.batch_norm_fold import fold_all_batch_norms
 from aimet_torch.model_preparer import prepare_model
 from aimet_common.defs import QuantScheme
 from aimet_torch.quantsim import QuantizationSimModel
-from BOS_config.torch_util import to_onnx_qdq
+from BOS_util.util import to_qdq_torch
 import shutil
 import onnx
 import onnxruntime as ort
@@ -148,7 +148,7 @@ def main(args):
     logger.info(f'exclude : {exclude}')   
     exclude_torch_quantizer(sim.model,exclude)
     sim.compute_encodings(forward_pass_callback=lambda model, device: calibrate(model,device,data_loader, 2000), forward_pass_callback_args=args.device)
-    qdq_model =   to_onnx_qdq(sim.model,dummy_input)
+    qdq_model =   to_qdq_torch(sim.model,dummy_input)
     onnx.save(qdq_model,root+f'{args.prefix}.onnx')
     with open(root+'graph_qdq.graph', "w") as f: f.write(str(qdq_model.graph.node))
     qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])      
