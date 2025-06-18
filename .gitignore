@@ -14,5 +14,6 @@ wandb
 ##
 *.graph
 *.encodings
+*.whl
 ## LLM
 sparse_logs
