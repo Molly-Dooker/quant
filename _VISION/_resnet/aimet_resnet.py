@@ -109,7 +109,7 @@ from aimet_torch.batch_norm_fold import fold_all_batch_norms
 from aimet_torch.model_preparer import prepare_model
 from aimet_common.defs import QuantScheme
 from aimet_torch.quantsim import QuantizationSimModel
-from BOS_util.util import to_qdq_torch
+from BOS_util.bos_util import to_qdq_torch
 import shutil
 import onnx
 import onnxruntime as ort

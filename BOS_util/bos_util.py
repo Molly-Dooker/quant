@@ -42,7 +42,7 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
     if onnx_opset_version < 10:
         desired_onnx_opset_version = 10
 
-        logger.info(
+        logger.warning(
             "onnx::QuantizeLinear and DequantizeLinear are only supported in opset >= 10;"
             " got opset=%d",
             onnx_opset_version,
@@ -55,7 +55,7 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
         for qtzr in sim.qc_quantize_op_dict.values()
     ):
         desired_onnx_opset_version = 13
-        logger.info(
+        logger.warning(
             "onnx::QuantizeLinear and DequantizeLinear with per-channel are only supported in opset >= 13;"
             " got opset=%d",
             onnx_opset_version,
@@ -68,7 +68,7 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
         for qtzr in sim.qc_quantize_op_dict.values()
     ):
         desired_onnx_opset_version = 21
-        logger.info(
+        logger.warning(
             "onnx::QuantizeLinear and DequantizeLinear with per-block are only supported in opset >= 21;"
             " got opset=%d",
             onnx_opset_version,
@@ -79,7 +79,7 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
         for qtzr in sim.qc_quantize_op_dict.values()
     ):
         desired_onnx_opset_version = 21
-        logger.info(
+        logger.warning(
             "onnx::QuantizeLinear and DequantizeLinear with INT16 are only supported in opset >= 21;"
             " got opset=%d",
             onnx_opset_version,
@@ -209,6 +209,7 @@ def to_qdq_torch(
         raise RuntimeError(
             f"aimet_torch.export only supports torch.nn.Module or QuantizationSimModel; got {type(model)}"
         )
+        logger.error(f"aimet_torch.export only supports torch.nn.Module or QuantizationSimModel; got {type(model)}")
 
     _check_opset_version(kwargs)
     _check_unsupported_args(kwargs)
@@ -266,6 +267,7 @@ def to_qdq_torch(
                 f"{f.getvalue()}"
                 "==============================================================\n\n"
             )
+            logger.error(msg)
             raise RuntimeError(msg) from e
     # onnx.save(onnx_qdq_model, f)
     
@@ -735,5 +737,27 @@ def _restore_model_output_names(
     _rename_outputs(onnx_model, _new_names)
     
 def save_graph(model, path):
-    with open(path, "w") as f: 
-        f.write(str(model.graph.node))
+    with open(path, "w") as f: f.write(str(model.graph.node))
+    
+    
+class TempLoggerPatch:
+    """
+    with 문 내에서 다른 모듈의 로거를 임시로 교체하는 컨텍스트 매니저.
+    """
+    def __init__(self, target_module, new_logger):
+        self.target_module = target_module
+        self.new_logger = new_logger
+        self.original_logger = None
+
+    def __enter__(self):
+        """with 블록 시작 시 호출: 로거를 교체합니다."""
+        # 원래 로거를 백업합니다.
+        self.original_logger = getattr(self.target_module, 'logger', None)
+        # 목표 모듈의 로거를 새로 설정한 로거로 교체합니다.
+        self.target_module.logger = self.new_logger
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """with 블록 종료 시 호출: 로거를 원상 복구합니다."""
+        # 백업해 둔 원래 로거로 복원합니다.
+        self.target_module.logger = self.original_logger

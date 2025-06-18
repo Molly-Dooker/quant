@@ -24,27 +24,7 @@ from _util import class_names, keyword_to_itype, update_stats
 from _yolov8s import Yolov8s
 from _dataloader import Processor, transform, custom_collate_fn
 
-class TempLoggerPatch:
-    """
-    with 문 내에서 다른 모듈의 로거를 임시로 교체하는 컨텍스트 매니저.
-    """
-    def __init__(self, target_module, new_logger):
-        self.target_module = target_module
-        self.new_logger = new_logger
-        self.original_logger = None
 
-    def __enter__(self):
-        """with 블록 시작 시 호출: 로거를 교체합니다."""
-        # 원래 로거를 백업합니다.
-        self.original_logger = getattr(self.target_module, 'logger', None)
-        # 목표 모듈의 로거를 새로 설정한 로거로 교체합니다.
-        self.target_module.logger = self.new_logger
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """with 블록 종료 시 호출: 로거를 원상 복구합니다."""
-        # 백업해 둔 원래 로거로 복원합니다.
-        self.target_module.logger = self.original_logger
 
 
         
@@ -101,7 +81,8 @@ from onnxsim import simplify
 import onnxruntime as ort
 from aimet_common.defs import QuantScheme
 from aimet_onnx.quantsim import QuantizationSimModel
-from BOS_util.util import to_qdq_onnx
+from BOS_util.bos_util import to_qdq_onnx, TempLoggerPatch
+from BOS_util import bos_util
 def main(args):
     logger_enable(args.prefix)
     logger.info('start!')
@@ -140,7 +121,9 @@ def main(args):
         sim.qc_quantize_op_dict[key].enabled = False
     
     sim.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=4000)
-    qdq_model = to_qdq_onnx(sim)
+    with TempLoggerPatch(bos_util, logger):
+        qdq_model = to_qdq_onnx(sim)
+    
     del sim
     with open(root+'graph_qdq.graph', "w") as f: f.write(str(qdq_model.graph.node))
     onnx.save(qdq_model,root+f'{args.prefix}.onnx')
