@@ -6,7 +6,7 @@ import math
 import ipdb
 from loguru import logger
 from tqdm import tqdm
-from _util import ipdb_sys_excepthook, keyword_to_itype, transform
+from _util import ipdb_sys_excepthook, keyword_to_itype, _transform
 
 import torch
 import evaluate
@@ -50,9 +50,7 @@ def eval(model, device, test_loader, prefix=''):
         for batch in tqdm(test_loader,desc='eval...'):
             data, target = batch["pixel_values"], batch["labels"]
             data= data.to(device)
-            output = model(data).logits
-            if isinstance(output, QTensor):
-                output = output.dequantize()
+            output = model(data)
             output = output.argmax(-1).cpu()
             metric.add_batch(predictions=output,references=target)
 
@@ -69,41 +67,48 @@ def calibrate(model, device, dataloader, num=10000):
             data = batch["pixel_values"].to(device)
             _ = model(data)
 
+import torchvision
+from aimet_torch.batch_norm_fold import fold_all_batch_norms
+from aimet_torch.model_preparer import prepare_model
+from aimet_common.defs import QuantScheme
+from aimet_torch.quantsim import QuantizationSimModel
+from BOS_util import to_qdq_torch,save_graph
+import shutil
+import onnx
+import onnxruntime as ort
 def main(args):
     logger_enable(args.prefix)
-    EVAL = args.eval
-
-    processor = ViTImageProcessor.from_pretrained(args.model_name)
-    model = ViTForImageClassification.from_pretrained(args.model_name)
-
+    config_path = '_default_config.json'
+    # processor = ViTImageProcessor.from_pretrained(args.model_name)
+    model2 = ViTForImageClassification.from_pretrained(args.model_name)        
+    model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1).eval()
     ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-    prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
+    prepared_ds = ds.with_transform(lambda batch: _transform(batch, torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1.transforms()))    
     dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    # eval(model, args.device, dataloader,'default') 81.88
+    dummy_input = torch.randn(1, 3, 224, 224)    
+    ipdb.set_trace()
+    model = prepare_model(model)
+    fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
+    model.to(args.device); dummy_input = dummy_input.to(args.device)
+    # jit_model = torch.jit.trace(model,dummy_input)
+    # mha = model.encoder.layers.encoder_layer_0.self_attention
+    # torch.nn.modules.activation.MultiheadAttention
 
-    # print("Model before quantization...")
-    if args.default: eval(model, args.device, dataloader, 'default')
+    sim = QuantizationSimModel(model=model,
+                            quant_scheme=QuantScheme.post_training_tf_enhanced,
+                            dummy_input=dummy_input,
+                            default_output_bw=8,
+                            default_param_bw=8,
+                            config_file=config_path)
 
-    weights = keyword_to_itype(args.weights)
-    activations = keyword_to_itype(args.activations)
-    # make exclude list
     exclude = ['vit.encoder.layer.5.output.dense',
                 'vit.encoder.layer.9.attention.attention.query']
     if args.exclude is not None:
         exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
         if args.exclude=='': exclude = []
     logger.info(f'exclude : {exclude}')   
-    # prepare model to quantize
-    _quantize(model, weights=weights, activations=activations, exclude=exclude)
-    # print(model)  
-    if activations is not None:
-        with _Calibration():
-            calibrate(model, args.device, dataloader)
-    print("frozen model")
-    freeze(model)
-    eval(model, args.device, dataloader,'quantized')
-    save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
-    with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
-        json.dump(quantization_map(model), f)
+
 
 if __name__ == "__main__":
 

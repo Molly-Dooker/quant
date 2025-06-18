@@ -5,6 +5,14 @@ from optimum.quanto import (
     qint4,
     qint8,
 )
+import torch
+
+def _transform(data_batch, processor):
+    inputs = {
+        'pixel_values': torch.stack([processor(image.convert('RGB')) for image in data_batch["image"]]),
+        'labels':       data_batch["label"]}
+
+    return inputs
 
 
 def transform(data_batch, processor):
