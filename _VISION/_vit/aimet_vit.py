@@ -87,14 +87,14 @@ def main(args):
     dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     # eval(model, args.device, dataloader,'default') 81.88
     dummy_input = torch.randn(1, 3, 224, 224)    
-    ipdb.set_trace()
+
     model = prepare_model(model)
     fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
     model.to(args.device); dummy_input = dummy_input.to(args.device)
     # jit_model = torch.jit.trace(model,dummy_input)
     # mha = model.encoder.layers.encoder_layer_0.self_attention
     # torch.nn.modules.activation.MultiheadAttention
-
+    ipdb.set_trace()
     sim = QuantizationSimModel(model=model,
                             quant_scheme=QuantScheme.post_training_tf_enhanced,
                             dummy_input=dummy_input,
