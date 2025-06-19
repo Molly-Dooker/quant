@@ -1,0 +1,483 @@
+
+class QuantizableMultiheadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, bias=True,
+                 add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None, batch_first=False):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.batch_first = batch_first
+        self.kdim = embed_dim if kdim is None else kdim
+        self.vdim = embed_dim if vdim is None else vdim
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+        self.head_dim = embed_dim // num_heads
+
+        # Define separate linear projections for Q, K, V
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        self.k_proj = nn.Linear(self.kdim, embed_dim, bias=bias)
+        self.v_proj = nn.Linear(self.vdim, embed_dim, bias=bias)
+        # Output projection
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+
+        # Optional learned biases for key and value sequences (add_bias_kv)
+        self.add_bias_kv = add_bias_kv
+        if add_bias_kv:
+            self.bias_k = nn.Parameter(torch.zeros(1, 1, embed_dim))
+            self.bias_v = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        else:
+            self.bias_k = None
+            self.bias_v = None
+
+        # Option to add zero-attention (add_zero_attn)
+        self.add_zero_attn = add_zero_attn
+
+        # Initialize parameters (use similar init as nn.MultiheadAttention)
+        # Using xavier for weights and zeros for biases
+        # (We'll rely on nn.Linear default init which is also xavier/uniform)
+        # But ensure bias_k and bias_v (if any) are properly initialized:
+        if self.add_bias_kv:
+            nn.init.xavier_normal_(self.bias_k)
+            nn.init.xavier_normal_(self.bias_v)
+
+    def forward(self, query, key, value,
+                key_padding_mask=None, need_weights=True,
+                attn_mask=None, average_attn_weights=True, is_causal=False):
+        """
+        Args:
+            query, key, value: input sequences (Tensor)
+            key_padding_mask: bool mask of shape (N, S) to ignore certain key positions
+            attn_mask: attention mask (bool or float) of shape (L, S) or (N*num_heads, L, S) to prevent attention to some positions
+            need_weights: whether to return attention weights
+            average_attn_weights: if True, average weights across heads before returning
+            is_causal: if True, apply causal mask (for self-attention). Cannot be set if attn_mask is supplied.
+        Returns:
+            attn_output: Tensor of shape (L, N, E) if batch_first=False or (N, L, E) if batch_first=True
+            attn_weights: None or attention weights of shape (N, L, S) (averaged) or (N, num_heads, L, S) (per-head) if need_weights=True
+        """
+        # Handle batch_first: transpose inputs to shape (L, N, E) if necessary
+        orig_bsz = query.size(0) if self.batch_first else query.size(1)
+        if self.batch_first:
+            # (N, L, E) -> (L, N, E)
+            query = query.transpose(0, 1)
+            key = key.transpose(0, 1)
+            value = value.transpose(0, 1)
+
+        L, N, _ = query.shape  # target length, batch size
+        S = key.shape[0]       # source sequence length
+
+        # Apply linear projections to get Q, K, V of shape (L, N, E)
+        Q = self.q_proj(query)
+        K = self.k_proj(key)
+        V = self.v_proj(value)
+
+        # If configured, add bias vectors to key and value sequences:contentReference[oaicite:0]{index=0}
+        if self.add_bias_kv:
+            # bias_k and bias_v have shape (1, 1, E); expand to (1, N, E) and append to sequence
+            bias_k = self.bias_k.expand(1, N, self.embed_dim)
+            bias_v = self.bias_v.expand(1, N, self.embed_dim)
+            K = torch.cat([K, bias_k], dim=0)  # append as an extra sequence element
+            V = torch.cat([V, bias_v], dim=0)
+            S = K.size(0)  # update source length to S+1
+            # If an attn_mask is present, pad it to account for the new key/value:contentReference[oaicite:1]{index=1}
+            if attn_mask is not None:
+                # Pad attn_mask on the source sequence dimension
+                if attn_mask.dtype == torch.bool:
+                    attn_mask = F.pad(attn_mask, (0, 1), value=False)
+                else:
+                    attn_mask = F.pad(attn_mask, (0, 1), value=0.0)
+            if key_padding_mask is not None:
+                # Pad key_padding_mask with a False (allowed) for the new bias element
+                new_col = torch.zeros(key_padding_mask.size(0), 1, dtype=torch.bool, device=key_padding_mask.device)
+                key_padding_mask = torch.cat([key_padding_mask, new_col], dim=1)
+
+        # If add_zero_attn, append a zero vector to key and value (at seq dim=1 for batch_first or 0 for non-batch_first) 
+        if self.add_zero_attn:
+            # Append zeros of shape (1, N, E) to key and value sequences
+            zero_k = K.new_zeros((1, N, self.embed_dim))
+            zero_v = V.new_zeros((1, N, self.embed_dim))
+            K = torch.cat([K, zero_k], dim=0)
+            V = torch.cat([V, zero_v], dim=0)
+            S = K.size(0)
+            if attn_mask is not None:
+                # Pad attn_mask for the added zero key
+                if attn_mask.dtype == torch.bool:
+                    attn_mask = F.pad(attn_mask, (0, 1), value=False)
+                else:
+                    attn_mask = F.pad(attn_mask, (0, 1), value=0.0)
+            if key_padding_mask is not None:
+                new_col = torch.zeros(key_padding_mask.size(0), 1, dtype=torch.bool, device=key_padding_mask.device)
+                key_padding_mask = torch.cat([key_padding_mask, new_col], dim=1)
+
+        # Reshape Q, K, V to incorporate heads: from (L, N, E) to (N, num_heads, L, head_dim)
+        # First, reshape to (L, N, num_heads, head_dim), then permute
+        Q = Q.contiguous().view(L, N, self.num_heads, self.head_dim).permute(1, 2, 0, 3)  # (N, H, L, head_dim)
+        K = K.contiguous().view(S, N, self.num_heads, self.head_dim).permute(1, 2, 0, 3)  # (N, H, S, head_dim)
+        V = V.contiguous().view(S, N, self.num_heads, self.head_dim).permute(1, 2, 0, 3)  # (N, H, S, head_dim)
+
+        # Prepare the attention mask in a form broadcastable to (N, H, L, S):contentReference[oaicite:2]{index=2}:contentReference[oaicite:3]{index=3}
+        attn_mask_final = None
+        if attn_mask is not None or key_padding_mask is not None or is_causal:
+            # Determine mask type and shape
+            # If attn_mask is set to causal flag, create lower-triangular mask
+            if is_causal:
+                if attn_mask is not None:
+                    raise ValueError("attn_mask and is_causal cannot be used together")
+                # Generate causal mask for (L, S): allow j <= i
+                causal_mask = torch.ones((L, S), dtype=torch.bool, device=Q.device).tril(diagonal=0)
+                attn_mask = causal_mask  # treat this as attn_mask from now on (bool where True=allowed)
+            # If attn_mask has shape (N*H, L, S), reshape it to (N, H, L, S)
+            if attn_mask is not None and attn_mask.dim() == 3 and attn_mask.shape[0] == N * self.num_heads:
+                # Per-head attention mask provided
+                mask = attn_mask
+                if mask.dtype == torch.bool:
+                    # Convert bool mask to additive float mask (True->0, False->-inf)
+                    expanded_mask = torch.zeros_like(mask, dtype=Q.dtype)
+                    expanded_mask[~mask] = float("-inf")
+                else:
+                    expanded_mask = mask.to(Q.dtype)
+                attn_mask_final = expanded_mask.view(N, self.num_heads, L, S)
+            else:
+                # Create a combined additive mask (float) of shape (N, 1, L, S)
+                attn_mask_final = torch.zeros((N, 1, L, S), dtype=Q.dtype, device=Q.device)
+                if attn_mask is not None:
+                    if attn_mask.dtype == torch.bool:
+                        # attn_mask shape (L, S) or (N, L, S)
+                        bool_mask = attn_mask
+                        if bool_mask.dim() == 2:
+                            bool_mask = bool_mask.unsqueeze(0)  # (1, L, S)
+                        # Fill -inf where attn_mask is False (disallowed positions)
+                        attn_mask_final[:, 0, :, :] = torch.where(bool_mask, 
+                                                                 torch.zeros_like(attn_mask_final[:, 0, :, :]), 
+                                                                 float("-inf"))
+                    else:
+                        # attn_mask is float (e.g. additive mask with -inf values)
+                        float_mask = attn_mask.to(Q.dtype)
+                        if float_mask.dim() == 2:
+                            float_mask = float_mask.unsqueeze(0)  # (1, L, S)
+                        attn_mask_final[:, 0, :, :] += float_mask  # broadcast add
+                if key_padding_mask is not None:
+                    # key_padding_mask shape (N, S) where True indicates padded (to mask out)
+                    # Expand to (N,1,1,S) and fill -inf at those positions across all L
+                    pad_mask = key_padding_mask.unsqueeze(1).unsqueeze(2)  # (N,1,1,S)
+                    attn_mask_final.masked_fill_(pad_mask, float("-inf"))
+            # If we created attn_mask_final with shape (N,1,L,S), it will broadcast across heads
+            if attn_mask_final is not None and attn_mask_final.shape[1] == 1:
+                attn_mask_final = attn_mask_final  # broadcast to (N, H, L, S) automatically
+        # Choose the computation path based on need_weights for performance:contentReference[oaicite:4]{index=4} 
+        if not need_weights:
+            # Fast path: use PyTorch's optimized scaled dot-product attention (no weight output)
+            attn_output = F.scaled_dot_product_attention(
+                Q, K, V,
+                attn_mask=attn_mask_final,
+                dropout_p=self.dropout if self.training else 0.0,
+                is_causal=False  # we already handled causal via attn_mask_final if needed
+            )
+            # attn_output shape: (N, H, L, head_dim):contentReference[oaicite:5]{index=5}:contentReference[oaicite:6]{index=6}
+            # Reshape back to (L, N, E)
+            attn_output = attn_output.permute(0, 2, 1, 3).reshape(N, L, self.embed_dim).transpose(0, 1)
+            # Apply output projection
+            attn_output = self.out_proj(attn_output)
+            # If batch_first, transpose output back to (N, L, E)
+            if self.batch_first:
+                attn_output = attn_output.transpose(0, 1)
+            return attn_output, None
+        else:
+            # need_weights=True: manually compute attention (to obtain weights)
+            # Compute raw attention scores: Q @ K^T (scaled)
+            # Q: (N, H, L, head_dim), K: (N, H, S, head_dim)
+            # Compute attn_weights for each head: (N, H, L, S)
+            attn_weights = torch.matmul(Q, K.transpose(-2, -1))  # Q * K^T
+            attn_weights *= (1.0 / math.sqrt(self.head_dim))    # scale by 1/sqrt(d_k)
+            if attn_mask_final is not None:
+                attn_weights += attn_mask_final  # add additive mask (contains -inf for masked positions):contentReference[oaicite:7]{index=7}
+            # Apply softmax to get attention probabilities
+            attn_weights = torch.softmax(attn_weights, dim=-1)
+            # Apply dropout to attention weights (during training):contentReference[oaicite:8]{index=8}
+            attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
+            # Compute attention output as weighted sum of V: (N, H, L, head_dim)
+            attn_output = torch.matmul(attn_weights, V)
+            # Reshape attn_output back to (L, N, E)
+            attn_output = attn_output.permute(0, 2, 1, 3).reshape(N, L, self.embed_dim).transpose(0, 1)
+            # Output projection
+            attn_output = self.out_proj(attn_output)
+            # If batch_first, transpose output to (N, L, E)
+            if self.batch_first:
+                attn_output = attn_output.transpose(0, 1)
+            # Prepare attn_weights return
+            if average_attn_weights:
+                # Average over heads (N, H, L, S) -> (N, L, S)
+                attn_weights = attn_weights.mean(dim=1)  # average across head dimension
+            # If batch_first, the attn_weights should also be returned in (N, L, S) format
+            # (In both cases we are currently (N, ... L, S) with N as batch)
+            if not self.batch_first:
+                # For consistency with nn.MultiheadAttention, return weights as (N, L, S) when batch_first=False as well
+                # (They typically return (N, L, S) already when batch_first=False by default)
+                pass
+            return attn_output, attn_weights
+
+
+def convert_to_quantizable_mha(module: nn.Module) -> nn.Module:
+    """
+    Recursively convert all nn.MultiheadAttention modules in `module` to QuantizableMultiheadAttention.
+    Returns the modified module.
+    """
+    for name, child in list(module._modules.items()):  # use _modules to allow assignment
+        # If the child is a MultiheadAttention (or subclass thereof)
+        if isinstance(child, nn.MultiheadAttention):
+            # Gather parameters from the existing MultiheadAttention
+            embed_dim = child.embed_dim
+            num_heads = child.num_heads
+            dropout = child.dropout
+            bias = child.in_proj_bias is not None  # if bias was used
+            add_bias_kv = hasattr(child, 'bias_k') and child.bias_k is not None
+            add_zero_attn = getattr(child, 'add_zero_attn', False)
+            kdim = child.kdim
+            vdim = child.vdim
+            batch_first = getattr(child, 'batch_first', False)
+
+            # Create a new QuantizableMultiheadAttention with the same hyperparameters
+            new_mha = QuantizableMultiheadAttention(embed_dim, num_heads, dropout=dropout,
+                                                   bias=bias, add_bias_kv=add_bias_kv,
+                                                   add_zero_attn=add_zero_attn,
+                                                   kdim=kdim, vdim=vdim, batch_first=batch_first)
+            # Copy projection weights and biases from the old module to the new module
+            # Handle combined or separate weight matrices
+            if child.in_proj_weight is not None:
+                # The old MHA uses a single weight matrix for Q,K,V
+                W = child.in_proj_weight.data  # shape (3*E, E)
+                b = child.in_proj_bias.data if child.in_proj_bias is not None else None
+                # Slice weights and biases for Q, K, V
+                q_w, k_w, v_w = W[0:embed_dim, :], W[embed_dim:2*embed_dim, :], W[2*embed_dim:3*embed_dim, :]
+                new_mha.q_proj.weight.data.copy_(q_w)
+                new_mha.k_proj.weight.data.copy_(k_w)
+                new_mha.v_proj.weight.data.copy_(v_w)
+                if bias and b is not None:
+                    q_b, k_b, v_b = b[0:embed_dim], b[embed_dim:2*embed_dim], b[2*embed_dim:3*embed_dim]
+                    new_mha.q_proj.bias.data.copy_(q_b)
+                    new_mha.k_proj.bias.data.copy_(k_b)
+                    new_mha.v_proj.bias.data.copy_(v_b)
+            else:
+                # The old MHA uses separate weight matrices
+                # (This happens if kdim or vdim differ from embed_dim)
+                q_w = child.q_proj_weight.data  # shape (E, E)
+                k_w = child.k_proj_weight.data  # shape (E, kdim)
+                v_w = child.v_proj_weight.data  # shape (E, vdim)
+                new_mha.q_proj.weight.data.copy_(q_w)
+                new_mha.k_proj.weight.data.copy_(k_w)
+                new_mha.v_proj.weight.data.copy_(v_w)
+                if bias and child.in_proj_bias is not None:
+                    # Bias is still combined in old MHA
+                    b = child.in_proj_bias.data
+                    q_b, k_b, v_b = b[0:embed_dim], b[embed_dim:2*embed_dim], b[2*embed_dim:3*embed_dim]
+                    new_mha.q_proj.bias.data.copy_(q_b)
+                    new_mha.k_proj.bias.data.copy_(k_b)
+                    new_mha.v_proj.bias.data.copy_(v_b)
+            # Copy out_proj weights and bias
+            new_mha.out_proj.weight.data.copy_(child.out_proj.weight.data)
+            if child.out_proj.bias is not None:
+                new_mha.out_proj.bias.data.copy_(child.out_proj.bias.data)
+            # Copy bias_k and bias_v if applicable
+            if add_bias_kv:
+                new_mha.bias_k.data.copy_(child.bias_k.data)
+                new_mha.bias_v.data.copy_(child.bias_v.data)
+            # Replace the module in the parent with the new module
+            module._modules[name] = new_mha
+        else:
+            # Recursively convert sub-modules
+            convert_to_quantizable_mha(child)
+    return module
+
+
+
+#########################################
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch import Tensor
+from torch.nn import Parameter
+import aimet_modules
+from typing import Optional
+
+def create_quantizable_multihead_attention(
+    module: nn.MultiheadAttention,
+) -> 'QuantizableMultiheadAttention':
+    """
+    Create QuantizableMultiheadAttention using existing torch.nn.MultiheadAttention module
+    :param module: Existing torch.nn.MultiheadAttention module
+    :return: Newly created QuantizableMultiheadAttention module
+    """
+    # Determine flags from original module
+    bias = module.in_proj_bias is not None
+    add_bias_kv = (module.bias_k is not None and module.bias_v is not None)
+
+    # Instantiate new quantizable MHA
+    q_MHA = QuantizableMultiheadAttention(
+        embed_dim=module.embed_dim,
+        num_heads=module.num_heads,
+        dropout=module.dropout,
+        bias=bias,
+        add_bias_kv=add_bias_kv,
+        add_zero_attn=module.add_zero_attn,
+        kdim=module.kdim,
+        vdim=module.vdim,
+        batch_first=module.batch_first,
+    )
+
+    # Copy weights and biases
+    with torch.no_grad():
+        # Split in_proj weight into Q, K, V
+        if module.in_proj_weight is not None:
+            w_q, w_k, w_v = torch.chunk(module.in_proj_weight.data, 3, dim=0)
+        else:
+            w_q = module.q_proj_weight.data
+            w_k = module.k_proj_weight.data
+            w_v = module.v_proj_weight.data
+
+        q_MHA.linear_Q.weight.copy_(w_q)
+        q_MHA.linear_K.weight.copy_(w_k)
+        q_MHA.linear_V.weight.copy_(w_v)
+        q_MHA.out_proj.weight.copy_(module.out_proj.weight.data)
+
+        if bias:
+            # in_proj_bias splits
+            b_q, b_k, b_v = torch.chunk(module.in_proj_bias.data, 3, dim=0)
+            # set projection biases
+            q_MHA.linear_Q.bias.copy_(b_q)
+            q_MHA.linear_K.bias.copy_(b_k)
+            q_MHA.linear_V.bias.copy_(b_v)
+            # if original module had separate bias_k/v, copy those too
+            if add_bias_kv:
+                q_MHA.bias_k.copy_(module.bias_k.data)
+                q_MHA.bias_v.copy_(module.bias_v.data)
+            # out_proj bias
+            q_MHA.out_proj.bias.copy_(module.out_proj.bias.data)
+
+    return q_MHA
+
+
+class QuantizableMultiheadAttention(nn.MultiheadAttention):
+    """Quantizable implementation of torch.nn.MultiheadAttention"""
+    _FLOAT_MODULE = nn.MultiheadAttention
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        dropout: float = 0.0,
+        bias: bool = True,
+        add_bias_kv: bool = False,
+        add_zero_attn: bool = False,
+        kdim: int = None,
+        vdim: int = None,
+        batch_first: bool = False,
+        **factory_kwargs,
+    ) -> None:
+        super().__init__(embed_dim, num_heads, dropout, bias,
+                         add_bias_kv, add_zero_attn, kdim, vdim,
+                         batch_first, **factory_kwargs)
+        # Replace in_proj with explicit linears
+        self.linear_Q = nn.Linear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
+        self.linear_K = nn.Linear(self.kdim, embed_dim, bias=bias, **factory_kwargs)
+        self.linear_V = nn.Linear(self.vdim, embed_dim, bias=bias, **factory_kwargs)
+        # Override out_proj with standard Linear
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
+
+        # AIMET operations for quantization hooks
+        self.div = aimet_modules.Divide()
+        self.matmul_1 = aimet_modules.MatMul()
+        self.matmul_2 = aimet_modules.MatMul()
+        self.mask_add = aimet_modules.Add()
+        self.softmax = nn.Softmax(dim=-1)
+
+    def _get_name(self):
+        return "QuantizableMultiheadAttention"
+
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        key_padding_mask: Optional[Tensor] = None,
+        need_weights: bool = True,
+        attn_mask: Optional[Tensor] = None,
+        average_attn_weights: bool = True,
+        is_causal: bool = False,
+    ) -> Tuple[Tensor, Optional[Tensor]]:
+        return self._forward_impl(query, key, value,
+                                  key_padding_mask, need_weights,
+                                  attn_mask, average_attn_weights)
+
+    def _forward_impl(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        key_padding_mask: Optional[Tensor] = None,
+        need_weights: bool = True,
+        attn_mask: Optional[Tensor] = None,
+        average_attn_weights: bool = True,
+    ) -> Tuple[Tensor, Optional[Tensor]]:
+        # Prepare shapes
+        if self.batch_first:
+            # transpose to (seq_len, batch, embed_dim)
+            query, key, value = [t.transpose(0, 1) for t in (query, key, value)]
+        tgt_len, bsz, _ = query.size()
+
+        # Linear projections
+        q = self.div(self.linear_Q(query), float((self.embed_dim // self.num_heads) ** 0.5))
+        k = self.linear_K(key)
+        v = self.linear_V(value)
+
+        # Handle masks
+        if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
+            key_padding_mask = key_padding_mask.to(torch.bool)
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.uint8:
+                attn_mask = attn_mask.to(torch.bool)
+            if attn_mask.dim() == 2:
+                attn_mask = attn_mask.unsqueeze(0)
+
+        # Reshape for heads: (batch*num_heads, seq_len, head_dim)
+        head_dim = self.embed_dim // self.num_heads
+        q = q.contiguous().view(tgt_len, bsz * self.num_heads, head_dim).transpose(0, 1)
+        k = k.contiguous().view(-1, bsz * self.num_heads, head_dim).transpose(0, 1)
+        v = v.contiguous().view(-1, bsz * self.num_heads, head_dim).transpose(0, 1)
+
+        # Compute attention scores
+        attn_weights = self.matmul_1(q, k.transpose(1, 2))
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_weights.masked_fill_(attn_mask, float('-inf'))
+            else:
+                self.mask_add(attn_weights, attn_mask)
+        if key_padding_mask is not None:
+            attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, -1)
+            attn_weights = attn_weights.masked_fill(
+                key_padding_mask.unsqueeze(1).unsqueeze(2), float('-inf')
+            ).view(bsz * self.num_heads, tgt_len, -1)
+
+        # Softmax and dropout
+        attn_weights = self.softmax(attn_weights)
+        attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
+
+        # Weighted sum
+        attn_output = self.matmul_2(attn_weights, v)
+
+        # Recombine heads
+        if self.batch_first:
+            attn_output = attn_output.view(bsz, self.num_heads, tgt_len, head_dim)
+            attn_output = attn_output.transpose(1, 2).contiguous().view(bsz, tgt_len, self.embed_dim)
+        else:
+            attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, self.embed_dim)
+
+        # Final projection
+        attn_output = self.out_proj(attn_output)
+
+        # Return weights if needed
+        if not need_weights:
+            return attn_output, None
+        attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, -1)
+        if average_attn_weights:
+            attn_weights = attn_weights.mean(dim=1)
+        return attn_output, attn_weights
