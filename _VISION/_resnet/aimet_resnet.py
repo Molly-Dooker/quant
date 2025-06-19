@@ -134,7 +134,7 @@ def main(args):
     fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
 
     model.to(args.device); dummy_input = dummy_input.to(args.device)
-    sim = QuantizationSimModel(model=model,
+    engine = QuantizationSimModel(model=model,
                             quant_scheme=QuantScheme.post_training_tf_enhanced,
                             dummy_input=dummy_input,
                             default_output_bw=8,
@@ -146,9 +146,9 @@ def main(args):
         exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
         if args.exclude=='': exclude = []
     logger.info(f'exclude : {exclude}')   
-    exclude_torch_quantizer(sim.model,exclude)
-    sim.compute_encodings(forward_pass_callback=lambda model, device: calibrate(model,device,data_loader, 2000), forward_pass_callback_args=args.device)
-    qdq_model =   to_qdq_torch(sim.model,dummy_input)
+    exclude_torch_quantizer(engine.model,exclude)
+    engine.compute_encodings(forward_pass_callback=lambda model, device: calibrate(model,device,data_loader, 2000), forward_pass_callback_args=args.device)
+    qdq_model =   to_qdq_torch(engine,dummy_input)
     onnx.save(qdq_model,root+f'{args.prefix}.onnx')
     with open(root+'graph_qdq.graph', "w") as f: f.write(str(qdq_model.graph.node))
     qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])      

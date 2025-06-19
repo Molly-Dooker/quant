@@ -7,7 +7,7 @@ from tqdm import tqdm
 import argparse
 import json
 import os
-
+import re
 import torch
 from datasets import load_dataset
 from ultralytics import YOLO
@@ -80,10 +80,12 @@ import shutil
 from onnxsim import simplify
 import onnxruntime as ort
 from aimet_common.defs import QuantScheme
-from aimet_onnx.quantsim import QuantizationSimModel
+from aimet_onnx.quantsim import QuantizationSimModel as Engine
 from BOS_util.bos_util import to_qdq_onnx, TempLoggerPatch
 from BOS_util import bos_util
 def main(args):
+    config_path = '_simple_config.json'
+    
     logger_enable(args.prefix)
     logger.info('start!')
        
@@ -94,7 +96,7 @@ def main(args):
     model= onnx.load('yolov8s.onnx')
     root = f'output/{args.prefix}/'        
     os.makedirs(root,exist_ok=True)
-    shutil.copyfile('_custom_config.json',root+'config.json')  
+    shutil.copyfile(config_path,root+'config.json')  
     
         
     try:    model, _ = simplify(model); print('simplify success')
@@ -104,31 +106,34 @@ def main(args):
     # session = ort.InferenceSession(model.SerializeToString(),providers=providers)   
     # eval(session, dataloader, args.size, 'default') 
 
-    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-    sim = QuantizationSimModel(model=model,
+    providers = [
+        ("CUDAExecutionProvider", {"device_id": int(args.device[5:])}),
+        "CPUExecutionProvider",
+    ]
+    engine = Engine(model=model,
                             quant_scheme=QuantScheme.post_training_tf,
                             default_activation_bw=8,
                             default_param_bw=8,
                             providers=providers,
-                            config_file='_custom_config.json')
+                            config_file=config_path)
 
-    for key in sim.qc_quantize_op_dict:
-        qc = sim.qc_quantize_op_dict[key]
+    for key in engine.qc_quantize_op_dict:
+        qc = engine.qc_quantize_op_dict[key]
         enabled = qc.enabled
         if not enabled: continue
         
         if not('constant' in key or 'Constant' in key or 'Squeeze' in key) : continue
-        sim.qc_quantize_op_dict[key].enabled = False
+        engine.qc_quantize_op_dict[key].enabled = False
     
-    sim.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=4000)
+    engine.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=4000)
     with TempLoggerPatch(bos_util, logger):
-        qdq_model = to_qdq_onnx(sim)
+        qdq_model = to_qdq_onnx(engine)
     
-    del sim
+    del engine
     with open(root+'graph_qdq.graph', "w") as f: f.write(str(qdq_model.graph.node))
     onnx.save(qdq_model,root+f'{args.prefix}.onnx')
     qdq_session = ort.InferenceSession(qdq_model.SerializeToString(),providers=providers)        
-    eval(qdq_session, dataloader, args.size, 'default') 
+    eval(qdq_session, dataloader, args.size, 'quantized') 
 
 
 if __name__ == '__main__':
