@@ -117,15 +117,16 @@ def main(args):
                             providers=providers,
                             config_file=config_path)
 
-    for key in engine.qc_quantize_op_dict:
-        qc = engine.qc_quantize_op_dict[key]
-        enabled = qc.enabled
-        if not enabled: continue
+    # for key in engine.qc_quantize_op_dict:
+    #     qc = engine.qc_quantize_op_dict[key]
+    #     enabled = qc.enabled
+    #     if not enabled: continue
         
-        if not('constant' in key or 'Constant' in key or 'Squeeze' in key) : continue
-        engine.qc_quantize_op_dict[key].enabled = False
+    #     if not('constant' in key or 'Constant' in key or 'Squeeze' in key) : continue
+    #     engine.qc_quantize_op_dict[key].enabled = False
     
-    engine.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=4000)
+    engine.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=2000)
+    ipdb.set_trace()
     with TempLoggerPatch(bos_util, logger):
         qdq_model = to_qdq_onnx(engine)
     
