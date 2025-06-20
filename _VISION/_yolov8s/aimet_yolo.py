@@ -81,7 +81,7 @@ from onnxsim import simplify
 import onnxruntime as ort
 from aimet_common.defs import QuantScheme
 from aimet_onnx.quantsim import QuantizationSimModel as Engine
-from BOS_util.bos_util import to_qdq_onnx, TempLoggerPatch
+from BOS_util.bos_util import to_onnx_qdq, TempLoggerPatch
 from BOS_util import bos_util
 from copy import deepcopy
 import aimet_onnx
@@ -132,7 +132,7 @@ def main(args):
 
     engine.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=2000)
     with TempLoggerPatch(bos_util, logger):
-        qdq_model = to_qdq_onnx(engine)
+        qdq_model = to_onnx_qdq(engine)
     del engine
     with open(root+'graph_qdq.graph', "w") as f: f.write(str(qdq_model.graph.node))
     onnx.save(qdq_model,root+f'{args.prefix}.onnx')
