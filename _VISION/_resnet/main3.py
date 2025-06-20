@@ -4,10 +4,11 @@ import json
 import itertools
 import math
 import ipdb
+import os
 from loguru import logger
 from tqdm import tqdm
-from _util import ipdb_sys_excepthook, keyword_to_itype, transform
-
+from _util import ipdb_sys_excepthook, keyword_to_itype, transform,_transform
+import torchvision
 import torch
 import evaluate
 from accelerate import init_empty_weights
@@ -17,6 +18,7 @@ from transformers import (
     ViTConfig,
     ViTForImageClassification,
     ViTImageProcessor,
+    AutoImageProcessor,
 )
 from optimum.quanto import (
     QTensor,
@@ -46,15 +48,21 @@ def eval(model, device, test_loader, prefix=''):
     model.to(device)
     model.eval()
     metric = evaluate.load("accuracy")
+    CORRECT = 0
+    TOTAL   = 0
     with torch.no_grad():
         for batch in tqdm(test_loader,desc='eval...'):
             data, target = batch["pixel_values"], batch["labels"]
             data= data.to(device)
-            output = model(data).logits
-            if isinstance(output, QTensor):
-                output = output.dequantize()
+            output = model(data)
             output = output.argmax(-1).cpu()
             metric.add_batch(predictions=output,references=target)
+            correct = (target==output).sum().item()
+            CORRECT+= correct
+            TOTAL  += target.shape[0]
+            
+            print(f'{CORRECT}/{TOTAL} : {CORRECT/TOTAL:.3f}')
+            
 
     acc = metric.compute()['accuracy']
     logger.info(f'{prefix} model acc : {acc*100:.2f}%')
@@ -69,69 +77,53 @@ def calibrate(model, device, dataloader, num=10000):
             data = batch["pixel_values"].to(device)
             _ = model(data)
 
+
+
+from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
+from BOS_util import simple_sym_qconfig_mapping, simple_asym_qconfig_mapping
 def main(args):
     logger_enable(args.prefix)
-    EVAL = args.eval
-    if not EVAL : 
-        processor = ViTImageProcessor.from_pretrained(args.model_name)
-        model = ViTForImageClassification.from_pretrained(args.model_name)
 
-        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    dummy_input = torch.randn(1, 3, 224, 224)
+    model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2).eval()
+    
+    # fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
+    
 
-        # print("Model before quantization...")
-        if args.default: eval(model, args.device, dataloader, 'default')
+    ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
+    prepared_ds = ds.with_transform(lambda batch: _transform(batch, torchvision.models.ResNet50_Weights.IMAGENET1K_V2.transforms()))
+    dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    
+    # eval(model,args.device,dataloader,'default') # 80.85
+    
+    qconfig_mapping = simple_asym_qconfig_mapping.set_module_name('fc',None)
 
-        weights = keyword_to_itype(args.weights)
-        activations = keyword_to_itype(args.activations)
-        # make exclude list
-        exclude = ['vit.encoder.layer.5.output.dense',
-                   'vit.encoder.layer.9.attention.attention.query']
-        if args.exclude is not None:
-            exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
-            if args.exclude=='': exclude = []
-        logger.info(f'exclude : {exclude}')   
-        # prepare model to quantize
-        _quantize(model, weights=weights, activations=activations, exclude=exclude)
-        # print(model)  
-        if activations is not None:
-            with _Calibration():
-                calibrate(model, args.device, dataloader)
-        print("frozen model")
-        freeze(model)
-        eval(model, args.device, dataloader,'quantized')
-        save_file(model.state_dict(), f'{args.saveroot}/{args.prefix}.safetensors')
-        with open(f'{args.saveroot}/{args.prefix}.json', 'w') as f:
-            json.dump(quantization_map(model), f)
+    prepared_model = prepare_fx(model, qconfig_mapping, dummy_input) 
+    
+    calibrate(prepared_model, args.device, dataloader, 4000)
+    
+    prepared_model.to('cpu')
+    q_model = convert_fx(prepared_model)
+    q_model.eval()  
+    jit_model = torch.jit.trace(q_model,dummy_input)
+    eval(jit_model,'cpu',dataloader,'default')
+    jit_model.save('asym_resnet.pt')
 
-    if EVAL:
-        processor = ViTImageProcessor.from_pretrained(args.model_name)
-        ds = load_dataset(path=args.dataset_name, cache_dir=args.cache_dir, split=args.split)
-        prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
-        dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-        state_dict = load_file(f'{args.saveroot}/{args.prefix}.safetensors')
-        with open(f'{args.saveroot}/{args.prefix}.json', 'r') as f:
-            qmap = json.load(f)
-        config = ViTConfig.from_pretrained(args.model_name)
-        with init_empty_weights():
-            model = ViTForImageClassification.from_pretrained(args.model_name, config=config)
-        _requantize(model, state_dict, qmap, args.device)
-        freeze(model)
-        eval(model, args.device, dataloader,'reloaded')
+
+
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="ViT")
-    parser.add_argument("--prefix", type=str, default="ViT")
-    parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
+    parser = argparse.ArgumentParser(description="resnet")
+    parser.add_argument("--prefix", type=str, default="resnet1")
+    # parser.add_argument("--model_name", type=str, default="google/vit-base-patch16-224")
     parser.add_argument("--dataset_name", type=str, default="Tsomaros/Imagenet-1k_validation")
     parser.add_argument("--cache_dir", type=str, default='/Data/Dataset/ImageNet')
     parser.add_argument("--saveroot", type=str, default='./_model')
     parser.add_argument("--split", type=str, default='validation')
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--device", type=int, default=1, help="The device to use for evaluation.")
+    parser.add_argument("--device", type=int, default=5, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
 

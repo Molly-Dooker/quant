@@ -76,19 +76,12 @@ def calibrate(model, device, dataloader, num=10000):
             _ = model(data)
 
 import torchvision
-from aimet_torch.batch_norm_fold import fold_all_batch_norms
-from aimet_torch.model_preparer import prepare_model
-from aimet_common.defs import QuantScheme
-from aimet_torch.quantsim import QuantizationSimModel
-from BOS_util import to_qdq_torch,save_graph
+
 
 
 from torch import nn
 import torch.nn.functional as F
 
-from torch.ao.quantization import get_default_qconfig_mapping, get_default_qat_qconfig_mapping, get_default_qconfig, get_default_qat_qconfig, QConfigMapping, QConfig
-from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
-from torch.nn import MultiheadAttention
 
 
 class CustomMultiheadAttention(nn.Module):
@@ -240,24 +233,11 @@ def main(args):
     q_model.eval()    
     jit_model = torch.jit.trace(q_model,dummy_input)
     
-    # jit_model.save('vit_jit.pt')
+    # 
     # jit_model = torch.jit.load('vit_jit.pt')
     eval(jit_model, 'cpu', dataloader,'quantized')
+    jit_model.save('vit_jit.pt')
 
-    
-
-    # model = prepare_model(model)
-    # fold_all_batch_norms(model, dummy_input.shape, dummy_input=dummy_input)
-    # model.to(args.device); dummy_input = dummy_input.to(args.device)
-
-
-
-    # exclude = ['vit.encoder.layer.5.output.dense',
-    #             'vit.encoder.layer.9.attention.attention.query']
-    # if args.exclude is not None:
-    #     exclude.extend([ x for x in args.exclude.replace(' ','').split(',') ]) 
-    #     if args.exclude=='': exclude = []
-    # logger.info(f'exclude : {exclude}')   
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ from optimum.quanto import (
     quantization_map
 )
 from _quanto import _quantize, _requantize, _Calibration
-from aimet_torch.batch_norm_fold import fold_all_batch_norms
+
 def logger_enable(prefix=''):
     def console_filter(record):
         # extra에 file_only가 True인 경우 콘솔 출력 제외
@@ -80,8 +80,7 @@ def calibrate(model, device, dataloader, num=10000):
 
 
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
-from torch.ao.quantization import get_default_qconfig_mapping, get_default_qat_qconfig_mapping, get_default_qconfig, get_default_qat_qconfig, QConfigMapping, QConfig
-
+from BOS_util import simple_sym_qconfig_mapping, simple_asym_qconfig_mapping
 def main(args):
     logger_enable(args.prefix)
 
@@ -97,9 +96,7 @@ def main(args):
     
     # eval(model,args.device,dataloader,'default') # 80.85
     
-    qconfig = get_default_qconfig()
-    qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig).set_object_type(torch.nn.ReLU,qconfig).set_object_type(torch.nn.BatchNorm2d,qconfig).set_object_type(torch.nn.LayerNorm,None)\
-        .set_module_name('fc',None)
+    qconfig_mapping = simple_sym_qconfig_mapping.set_module_name('fc',None)
 
     prepared_model = prepare_fx(model, qconfig_mapping, dummy_input) 
     
@@ -110,7 +107,7 @@ def main(args):
     q_model.eval()  
     jit_model = torch.jit.trace(q_model,dummy_input)
     eval(jit_model,'cpu',dataloader,'default')
-    jit_model.save('resnet.pt')
+    jit_model.save('sym_resnet.pt')
 
 
 
@@ -126,7 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--split", type=str, default='validation')
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--device", type=int, default=5, help="The device to use for evaluation.")
+    parser.add_argument("--device", type=int, default=4, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
 
