@@ -83,6 +83,8 @@ from aimet_common.defs import QuantScheme
 from aimet_onnx.quantsim import QuantizationSimModel as Engine
 from BOS_util.bos_util import to_qdq_onnx, TempLoggerPatch
 from BOS_util import bos_util
+from copy import deepcopy
+import aimet_onnx
 def main(args):
     config_path = '_simple_config.json'
     
@@ -93,7 +95,7 @@ def main(args):
     processor = Processor(new_shape=(args.size, args.size))
     prepared_ds = ds.with_transform(lambda batch: transform(batch, processor))
     dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, collate_fn=custom_collate_fn, num_workers=args.num_workers)       
-    model= onnx.load('yolov8s.onnx')
+    model= onnx.load('yolo.onnx')
     root = f'output/{args.prefix}/'        
     os.makedirs(root,exist_ok=True)
     shutil.copyfile(config_path,root+'config.json')  
@@ -110,26 +112,27 @@ def main(args):
         ("CUDAExecutionProvider", {"device_id": int(args.device[5:])}),
         "CPUExecutionProvider",
     ]
-    engine = Engine(model=model,
-                            quant_scheme=QuantScheme.post_training_tf,
-                            default_activation_bw=8,
-                            default_param_bw=8,
-                            providers=providers,
-                            config_file=config_path)
 
-    # for key in engine.qc_quantize_op_dict:
-    #     qc = engine.qc_quantize_op_dict[key]
-    #     enabled = qc.enabled
-    #     if not enabled: continue
+    engine = Engine(
+        model = deepcopy(model),
+        quant_scheme=QuantScheme.post_training_tf_enhanced,
+        param_type=aimet_onnx.int8,
+        activation_type=aimet_onnx.int8,
+        providers=providers,
+        config_file=config_path
+    )
+
+    for key in engine.qc_quantize_op_dict:
+        qc = engine.qc_quantize_op_dict[key]
+        enabled = qc.enabled
+        if not enabled: continue
         
-    #     if not('constant' in key or 'Constant' in key or 'Squeeze' in key) : continue
-    #     engine.qc_quantize_op_dict[key].enabled = False
-    
+        if not('constant' in key or 'Constant' in key or 'Squeeze' in key) : continue
+        engine.qc_quantize_op_dict[key].enabled = False
+
     engine.compute_encodings(forward_pass_callback= lambda session,samples : calibrate(session, dataloader, samples), forward_pass_callback_args=2000)
-    ipdb.set_trace()
     with TempLoggerPatch(bos_util, logger):
         qdq_model = to_qdq_onnx(engine)
-    
     del engine
     with open(root+'graph_qdq.graph', "w") as f: f.write(str(qdq_model.graph.node))
     onnx.save(qdq_model,root+f'{args.prefix}.onnx')

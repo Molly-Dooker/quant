@@ -5,7 +5,8 @@
                 },
                 "params": {},
                 "per_channel_quantization": "True",
-                "unsigned_symmetric": "False"
+                "unsigned_symmetric": "False",
+                "strict_symmetric": "False"
         },
         "params": {
                 "bias": {

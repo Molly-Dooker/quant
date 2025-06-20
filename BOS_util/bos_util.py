@@ -28,13 +28,30 @@ _TORCH_MAX_OPSET = _constants.ONNX_MAX_OPSET
 # Allow at least up to opset 21 to enable [u]int16 QDQ export
 _AIMET_MAX_OPSET = max(_TORCH_MAX_OPSET, 21)
 
-def to_qdq_onnx(sim) -> onnx.ModelProto:
+
+def to_onnx_qdq(engine) -> onnx.ModelProto:
     """
     Return a copy of ModelProto with all QcQuantizeOp replaced with
     onnx::QuantizeLinear and/or DequantizeLinear
     """
+    try:
+        invalid_bitwidth = next(
+            qtzr.bitwidth
+            for qtzr in engine.qc_quantize_op_dict.values()
+            if qtzr.data_type == QuantizationDataType.int
+            and qtzr.bitwidth not in (4, 8, 16, 32)
+        )
+    except StopIteration:
+        invalid_bitwidth = None
+
+    if invalid_bitwidth is not None:
+        raise RuntimeError(
+            f"Invalid bitwidth {invalid_bitwidth};"
+            " expected standard ONNX integer data types such as [U]INT{4, 8, 16, 32}"
+        )
+
     onnx_opset_version = next(
-        opset.version for opset in sim.model.opset_import() if opset.domain == ""
+        opset.version for opset in engine.model.opset_import() if opset.domain == ""
     )
 
     desired_onnx_opset_version = onnx_opset_version
@@ -42,7 +59,7 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
     if onnx_opset_version < 10:
         desired_onnx_opset_version = 10
 
-        logger.warning(
+        logger.info(
             "onnx::QuantizeLinear and DequantizeLinear are only supported in opset >= 10;"
             " got opset=%d",
             onnx_opset_version,
@@ -52,10 +69,10 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
         qtzr.quant_info.usePerChannelMode
         and qtzr.tensor_quantizer_params
         and qtzr.tensor_quantizer_params.channel_axis is not None
-        for qtzr in sim.qc_quantize_op_dict.values()
+        for qtzr in engine.qc_quantize_op_dict.values()
     ):
         desired_onnx_opset_version = 13
-        logger.warning(
+        logger.info(
             "onnx::QuantizeLinear and DequantizeLinear with per-channel are only supported in opset >= 13;"
             " got opset=%d",
             onnx_opset_version,
@@ -65,30 +82,30 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
         qtzr.quant_info.usePerChannelMode
         and qtzr.tensor_quantizer_params
         and qtzr.quant_info.blockSize > 0
-        for qtzr in sim.qc_quantize_op_dict.values()
+        for qtzr in engine.qc_quantize_op_dict.values()
     ):
         desired_onnx_opset_version = 21
-        logger.warning(
+        logger.info(
             "onnx::QuantizeLinear and DequantizeLinear with per-block are only supported in opset >= 21;"
             " got opset=%d",
             onnx_opset_version,
         )
 
     if onnx_opset_version < 21 and any(
-        qtzr.data_type == QuantizationDataType.int and 8 < qtzr.bitwidth <= 16
-        for qtzr in sim.qc_quantize_op_dict.values()
+        qtzr.data_type == QuantizationDataType.int and qtzr.bitwidth not in (8, 32)
+        for qtzr in engine.qc_quantize_op_dict.values()
     ):
         desired_onnx_opset_version = 21
-        logger.warning(
-            "onnx::QuantizeLinear and DequantizeLinear with INT16 are only supported in opset >= 21;"
+        logger.info(
+            "onnx::QuantizeLinear and DequantizeLinear with INT4/INT16 are only supported in opset >= 21;"
             " got opset=%d",
             onnx_opset_version,
         )
 
     model_copy = onnx.ModelProto()
-    model_copy.CopyFrom(sim.model.model)
+    model_copy.CopyFrom(engine.model.model)
 
-    sim._overwrite_parameters(model_copy, sim._get_qdq_parameters())
+    engine._overwrite_parameters(model_copy, engine._get_qdq_parameters())
 
     aimet_qc_quantize_nodes = [
         node
@@ -105,7 +122,7 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
     }
 
     for aimet_node in aimet_qc_quantize_nodes:
-        qtzr = sim.qc_quantize_op_dict[aimet_node.input[0]]
+        qtzr = engine.qc_quantize_op_dict[aimet_node.input[0]]
         encodings = qtzr._export_2_0_0_encodings()  # pylint: disable=protected-access
 
         if encodings:
@@ -117,7 +134,7 @@ def to_qdq_onnx(sim) -> onnx.ModelProto:
             qdq_node_info["encodings"].append(encodings)
 
     graph_output_names = [out.name for out in model_copy.graph.output]
-    sim.remove_quantizers(model_copy)
+    engine.remove_quantizers(model_copy)
 
     if onnx_opset_version < desired_onnx_opset_version:
         model_copy = onnx.version_converter.convert_version(

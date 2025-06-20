@@ -5,7 +5,7 @@
                 },
                 "params": {},
                 "unsigned_symmetric": "False",
-                "strict_symmetric": "True"
+                "strict_symmetric": "False"
         },
         "params": {
                 "bias": {
