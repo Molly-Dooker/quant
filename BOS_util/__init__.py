@@ -1,1 +1,1 @@
-from .bos_util import to_onnx_qdq, save_graph, TempLoggerPatch # ,to_qdq_torch
+from .onnx_util import to_onnx_qdq, save_graph, TempLoggerPatch # ,to_qdq_torch

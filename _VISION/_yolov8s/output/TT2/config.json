@@ -15,7 +15,7 @@
         "op_type": {
                 "MatMul": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "False",
+                        "is_output_quantized": "True",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {
@@ -26,7 +26,7 @@
                 },
                 "Conv": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "False",
+                        "is_output_quantized": "True",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {
@@ -37,7 +37,7 @@
                 },
                 "ConvTranspose": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "False",
+                        "is_output_quantized": "True",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {
@@ -48,7 +48,7 @@
                 },
                 "Gemm": {
                         "is_input_quantized": "True",
-                        "is_output_quantized": "False",
+                        "is_output_quantized": "True",
                         "per_channel_quantization": "True",
                         "params": {
                                 "weight": {

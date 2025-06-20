@@ -108,7 +108,6 @@ def main(args):
     prepared_model.to('cpu')
     q_model = convert_fx(prepared_model)
     q_model.eval()  
-    ipdb.set_trace()
     jit_model = torch.jit.trace(q_model,dummy_input)
     eval(jit_model,'cpu',dataloader,'default')
     jit_model.save('resnet.pt')
