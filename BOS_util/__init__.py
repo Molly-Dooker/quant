@@ -1,2 +1,2 @@
 from .onnx_util import to_onnx_qdq, save_graph, TempLoggerPatch
-from .torch_util import simple_asym_qconfig_mapping, simple_sym_qconfig_mapping
+from .torch_util import simple_asym_qconfig_mapping, simple_sym_qconfig_mapping, replace_attention_modules

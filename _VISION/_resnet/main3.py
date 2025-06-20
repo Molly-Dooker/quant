@@ -41,7 +41,7 @@ def logger_enable(prefix=''):
     logger.add("_logs/log", rotation="500 MB", level="INFO", format=LOG_FORMAT)
     logger = logger.bind(prefix=prefix)
 
-
+from torch.ao.quantization import get_default_qat_qconfig, get_default_qconfig
 
 
 def eval(model, device, test_loader, prefix=''):
@@ -96,7 +96,7 @@ def main(args):
     
     # eval(model,args.device,dataloader,'default') # 80.85
     
-    qconfig_mapping = simple_asym_qconfig_mapping.set_module_name('fc',None)
+    qconfig_mapping = simple_sym_qconfig_mapping.set_module_name('fc',None)
 
     prepared_model = prepare_fx(model, qconfig_mapping, dummy_input) 
     
@@ -107,7 +107,7 @@ def main(args):
     q_model.eval()  
     jit_model = torch.jit.trace(q_model,dummy_input)
     eval(jit_model,'cpu',dataloader,'default')
-    jit_model.save('asym_resnet.pt')
+    jit_model.save('sym_resnet.pt')
 
 
 
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--split", type=str, default='validation')
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--device", type=int, default=5, help="The device to use for evaluation.")
+    parser.add_argument("--device", type=int, default=4, help="The device to use for evaluation.")
     parser.add_argument("--weights", type=str, default="int8", choices=["int4", "int8", "float8"])
     parser.add_argument("--activations", type=str, default="int8", choices=["none", "int8", "float8"])
 

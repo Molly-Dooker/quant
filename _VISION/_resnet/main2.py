@@ -77,10 +77,13 @@ def calibrate(model, device, dataloader, num=10000):
             data = batch["pixel_values"].to(device)
             _ = model(data)
 
-
+from BOS_util import simple_sym_qconfig_mapping, simple_asym_qconfig_mapping
 
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
-from BOS_util import simple_sym_qconfig_mapping, simple_asym_qconfig_mapping
+from torch.ao.quantization import get_default_qconfig, get_default_qat_qconfig , QConfig, QConfigMapping
+from torch.ao.quantization import HistogramObserver, default_per_channel_weight_observer, MovingAverageMinMaxObserver
+from torch.ao.quantization.backend_config import get_qnnpack_backend_config
+from torch.ao.quantization.backend_config import DTypeConfig
 def main(args):
     logger_enable(args.prefix)
 
@@ -95,18 +98,43 @@ def main(args):
     dataloader = torch.utils.data.DataLoader(prepared_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     
     # eval(model,args.device,dataloader,'default') # 80.85
-    
-    qconfig_mapping = simple_sym_qconfig_mapping.set_module_name('fc',None)
+    backend_config = get_qnnpack_backend_config()
+    for pattern_cfg in backend_config.configs:
+        new_dtype_configs = []
+        for dt in pattern_cfg.dtype_configs:
+            new_dtype_configs.append(
+                DTypeConfig(
+                    input_dtype=torch.qint8,
+                    output_dtype=torch.qint8,
+                    weight_dtype=dt.weight_dtype,
+                    bias_dtype=dt.bias_dtype
+                    )
+                )
+        pattern_cfg.dtype_configs = new_dtype_configs
 
-    prepared_model = prepare_fx(model, qconfig_mapping, dummy_input) 
+    qconfig = QConfig(
+        activation=MovingAverageMinMaxObserver.with_args(dtype = torch.qint8, qscheme=torch.per_tensor_symmetric,reduce_range=False,quant_min=-128,quant_max=127),
+        weight=default_per_channel_weight_observer,
+    )
+    mapping = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig)\
+        # .set_object_type(torch.nn.ReLU,qconfig).set_object_type(torch.nn.BatchNorm2d,qconfig)
     
-    calibrate(prepared_model, args.device, dataloader, 4000)
+    prepared_model = prepare_fx(model, mapping, dummy_input,backend_config=backend_config) 
+    
+    
+    qconfig = get_default_qconfig()
+    mapping2 = QConfigMapping().set_object_type(torch.nn.Linear,qconfig).set_object_type(torch.nn.Conv2d,qconfig)\
+        .set_object_type(torch.nn.ReLU,qconfig).set_object_type(torch.nn.BatchNorm2d,qconfig)
+    prepared_model2 = prepare_fx(model, mapping2, dummy_input) 
+    
+    
+    calibrate(prepared_model, args.device, dataloader, 2000)
     
     prepared_model.to('cpu')
-    q_model = convert_fx(prepared_model)
+    q_model = convert_fx(prepared_model,backend_config=backend_config)
     q_model.eval()  
-    jit_model = torch.jit.trace(q_model,dummy_input)
-    eval(jit_model,'cpu',dataloader,'default')
+    jit_model = torch.jit.script(q_model,dummy_input)
+    eval(q_model,'cpu',dataloader,'default')
     jit_model.save('sym_resnet.pt')
 
 
