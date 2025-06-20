@@ -37,6 +37,20 @@ def transform(data_batch, processor):
     data_batch['origin_shape'] = origin_shape
     return data_batch
 
+def _transform(data_batch, processor):
+    # ipdb.set_trace()
+    origin_shape=[]
+    image_ = []
+    # data_batch['origin_image'] = data_batch['image']
+    for im in data_batch['image']:
+        im = np.array(im.convert('RGB'))[..., ::-1]
+        image_.append(im)
+        origin_shape.append(im.shape)
+    image_ = processor(image_)
+    # data_batch["image"] = image_
+    # data_batch['origin_shape'] = origin_shape
+    return {'image':image_}
+
 def custom_collate_fn(batch):
     # batch는 각 transform 결과를 담은 dict들의 리스트입니다.
     
