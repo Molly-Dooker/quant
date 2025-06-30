@@ -1,0 +1,18 @@
+__pycache__
+_logs
+*.pt
+_model
+_model_backup
+runs
+_test
+_stats
+wandb
+*.png
+*.jpg
+*.jpeg
+*.onnx
+##
+*.graph
+*.encodings
+## LLM
+sparse_logs
